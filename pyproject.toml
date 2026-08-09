@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stock-strategy-api"
+version = "0.1.0"
+description = "Rule-based CSI 300 stock strategy service"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "akshare>=1.17.0",
+  "exchange-calendars>=4.5",
+  "fastapi>=0.115",
+  "pandas>=2.2",
+  "pyarrow>=17.0",
+  "pydantic-settings>=2.6",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.11",
+]
+
+[project.scripts]
+stock-strategy = "stock_strategy_api.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stock_strategy_api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008"]
