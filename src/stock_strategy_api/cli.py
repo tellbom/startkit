@@ -24,9 +24,15 @@ def build_parser() -> argparse.ArgumentParser:
     sync = commands.add_parser("sync-data", help="Synchronize calendar, CSI300, security and OHLCV data")
     sync.add_argument("--as-of", required=True)
 
-    scan = commands.add_parser("scan", help="Run one strategy after market close")
+    scan = commands.add_parser("scan", help="Backfill recent trading days and advance signals through D3")
     scan.add_argument("--strategy", required=True)
     scan.add_argument("--as-of", required=True)
+    scan.add_argument(
+        "--lookback-trading-days",
+        type=int,
+        default=5,
+        help="Number of D0 trading dates to scan chronologically; use 1 for single-day mode",
+    )
 
     advance = commands.add_parser("advance-signals", help="Advance D1-D3 signal lifecycle")
     advance.add_argument("--strategy", default="strong_gap_up_v1")
@@ -55,7 +61,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "sync-data":
             result = DataSyncService(settings.data_dir).sync(args.as_of).to_dict()
         elif args.command == "scan":
-            result = ScanService(settings.data_dir, runs, signals).scan(registry.get(args.strategy), args.as_of)
+            result = ScanService(settings.data_dir, runs, signals).scan_recent(
+                registry.get(args.strategy),
+                args.as_of,
+                lookback_trading_days=args.lookback_trading_days,
+            )
         elif args.command == "advance-signals":
             result = ScanService(settings.data_dir, runs, signals).advance(registry.get(args.strategy), args.as_of)
         elif args.command == "backtest":

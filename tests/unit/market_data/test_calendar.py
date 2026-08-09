@@ -32,3 +32,17 @@ def test_calendar_respects_explicit_long_holiday(tmp_path):
     assert service.next_trading_day(dt.date(2026, 9, 30)) == dt.date(2026, 10, 12)
     with pytest.raises(InvalidDateError):
         service.nth_trading_day_after(dt.date(2026, 10, 12), 1)
+
+
+def test_trailing_trading_day_window_ignores_weekends(tmp_path):
+    service = CalendarService(tmp_path)
+    service.save_fixture(build_calendar_frame(dt.date(2026, 6, 25), periods=10))
+    assert service.trading_days_ending_on(dt.date(2026, 7, 1), 5) == [
+        dt.date(2026, 6, 25),
+        dt.date(2026, 6, 26),
+        dt.date(2026, 6, 29),
+        dt.date(2026, 6, 30),
+        dt.date(2026, 7, 1),
+    ]
+    with pytest.raises(ValueError):
+        service.trading_days_ending_on(dt.date(2026, 7, 1), 0)

@@ -59,6 +59,17 @@ class CalendarService:
             "date",
         ].tolist()
 
+    def trading_days_ending_on(self, value: dt.date | str, count: int) -> list[dt.date]:
+        if count < 1:
+            raise ValueError("count must be at least 1")
+        date = as_date(value)
+        if not self.is_trading_day(date):
+            raise InvalidDateError(f"{date} is not a trading day")
+        rows = self._load().loc[lambda item: (item["date"] <= date) & item["is_trading"]]
+        if len(rows) < count:
+            raise InvalidDateError(f"calendar does not contain {count} trading days ending on {date}")
+        return rows.tail(count)["date"].tolist()
+
     def nth_trading_day_after(self, value: dt.date | str, n: int) -> dt.date:
         if n < 0:
             raise ValueError("n must not be negative")

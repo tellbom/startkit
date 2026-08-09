@@ -152,3 +152,28 @@ def test_failed_later_scan_preserves_previous_success(tmp_path, qualifying_frame
     latest = runs.latest_successful_scan(strategy.metadata().strategy_id)
     assert latest is not None
     assert latest["run_id"] == successful["run_id"]
+
+
+def test_recent_scan_backfills_d0_even_when_latest_day_already_succeeded(tmp_path, qualifying_frames, d0):
+    calendar = _install_fixture(tmp_path, qualifying_frames, d0)
+    database = Database(tmp_path / "strategy.sqlite3")
+    database.initialize()
+    runs = RunRepository(database)
+    signals = SignalRepository(database)
+    service = ScanService(tmp_path, runs, signals)
+    strategy = StrongGapUpStrategy()
+    d3 = calendar.nth_trading_day_after(d0, 3)
+
+    service.scan(strategy, d3)
+    result = service.scan_recent(strategy, d3, lookback_trading_days=4)
+
+    assert result["scanned_dates"] == [
+        d0.isoformat(),
+        calendar.nth_trading_day_after(d0, 1).isoformat(),
+        calendar.nth_trading_day_after(d0, 2).isoformat(),
+        d3.isoformat(),
+    ]
+    rows, total = signals.list_signals(state="confirmed", include_exhaustion=True)
+    assert total == 1
+    assert rows[0].signal_date == d0
+    assert rows[0].confirmation_date == d3

@@ -117,6 +117,37 @@ class ScanService:
             )
             raise
 
+    def scan_recent(self, strategy: Strategy, value: dt.date | str, *, lookback_trading_days: int = 5) -> dict:
+        as_of = as_date(value)
+        days = self.calendar.trading_days_ending_on(as_of, lookback_trading_days)
+        daily_runs = []
+        total_triggered = 0
+        total_advanced = 0
+        for trade_date in days:
+            result = self.scan(strategy, trade_date)
+            advancement = self.advance(strategy, trade_date)
+            idempotent_replay = bool(result.get("idempotent_replay", False))
+            scan_advances = 0 if idempotent_replay else int(result.get("advanced", 0))
+            total_triggered += int(result.get("triggered", 0))
+            total_advanced += scan_advances + int(advancement["updated"])
+            daily_runs.append(
+                {
+                    "trade_date": trade_date.isoformat(),
+                    "run_id": result["run_id"],
+                    "triggered": int(result.get("triggered", 0)),
+                    "advanced": scan_advances + int(advancement["updated"]),
+                    "idempotent_replay": idempotent_replay,
+                }
+            )
+        return {
+            "as_of": as_of.isoformat(),
+            "lookback_trading_days": lookback_trading_days,
+            "scanned_dates": [day.isoformat() for day in days],
+            "triggered": total_triggered,
+            "advanced": total_advanced,
+            "daily_runs": daily_runs,
+        }
+
     def advance(self, strategy: Strategy, value: dt.date | str) -> dict:
         as_of = as_date(value)
         if not self.calendar.is_trading_day(as_of):
