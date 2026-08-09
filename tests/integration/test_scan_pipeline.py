@@ -165,14 +165,10 @@ def test_recent_scan_backfills_d0_even_when_latest_day_already_succeeded(tmp_pat
     d3 = calendar.nth_trading_day_after(d0, 3)
 
     service.scan(strategy, d3)
-    result = service.scan_recent(strategy, d3, lookback_trading_days=4)
+    result = service.scan_recent(strategy, d3)
 
-    assert result["scanned_dates"] == [
-        d0.isoformat(),
-        calendar.nth_trading_day_after(d0, 1).isoformat(),
-        calendar.nth_trading_day_after(d0, 2).isoformat(),
-        d3.isoformat(),
-    ]
+    assert result["lookback_trading_days"] == 7
+    assert result["scanned_dates"] == [day.isoformat() for day in calendar.trading_days_ending_on(d3, 7)]
     rows, total = signals.list_signals(state="confirmed", include_exhaustion=True)
     assert total == 1
     assert rows[0].signal_date == d0

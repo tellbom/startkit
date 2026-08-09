@@ -26,7 +26,7 @@ uvicorn stock_strategy_api.main:app --reload
 
 ```bash
 stock-strategy sync-data --as-of 2026-08-07
-stock-strategy scan --strategy strong_gap_up_v1 --as-of 2026-08-07 --lookback-trading-days 5
+stock-strategy scan --strategy strong_gap_up_v1 --as-of 2026-08-07
 stock-strategy advance-signals --as-of 2026-08-12
 stock-strategy backtest --strategy strong_gap_up_v1 --start 2025-01-01 --end 2025-12-31
 stock-strategy show-run --run-id RUN_ID
@@ -34,7 +34,7 @@ stock-strategy show-run --run-id RUN_ID
 
 数据同步和回测是长任务，只由 CLI 触发；HTTP API 只读取已物化结果。
 
-`scan` 默认按时间顺序补扫截至日最近 5 个交易日，并将历史信号推进到截至日，避免首次启动或漏跑后只检查最新 D0、遗漏已经完成 D3 的信号。传入 `--lookback-trading-days 1` 可执行显式单日扫描。
+`scan` 默认按策略配置覆盖完整生命周期，并按时间顺序补扫 D0、推进历史信号。当前配置为 D0 + 3 个确认交易日 + 3 个允许入场交易日，共回看 7 个交易日，避免首次启动或漏跑后遗漏仍可入场的已确认信号。传入 `--lookback-trading-days 1` 可执行显式单日扫描。
 
 ## 数据与验证边界
 

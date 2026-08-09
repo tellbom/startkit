@@ -30,8 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument(
         "--lookback-trading-days",
         type=int,
-        default=5,
-        help="Number of D0 trading dates to scan chronologically; use 1 for single-day mode",
+        default=None,
+        help=(
+            "Number of D0 trading dates to scan chronologically; default covers the strategy's "
+            "confirmation and entry-wait lifecycle; use 1 for single-day mode"
+        ),
     )
 
     advance = commands.add_parser("advance-signals", help="Advance D1-D3 signal lifecycle")

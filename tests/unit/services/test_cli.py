@@ -11,7 +11,7 @@ def test_parser_exposes_required_commands():
     parser = build_parser()
     args = parser.parse_args(["scan", "--strategy", "strong_gap_up_v1", "--as-of", "2026-06-30"])
     assert args.command == "scan"
-    assert args.lookback_trading_days == 5
+    assert args.lookback_trading_days is None
 
 
 def test_custom_config_changes_hash(tmp_path):
