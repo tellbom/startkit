@@ -71,9 +71,9 @@ def test_d0_volume_is_not_in_baseline(qualifying_frames, d0, eligible):
 def test_gap_percentage_boundary(qualifying_frames, d0, eligible):
     raw, qfq = qualifying_frames
     floor = float(raw.iloc[-2]["high"])
-    raw.loc[raw.index[-1], "low"] = floor * 1.0099
+    raw.loc[raw.index[-1], "low"] = floor * 1.0049
     assert not _detect(StrongGapUpStrategy(), raw, qfq, d0, eligible).triggered
-    raw.loc[raw.index[-1], "low"] = floor * 1.01
+    raw.loc[raw.index[-1], "low"] = floor * 1.005
     result = _detect(StrongGapUpStrategy(), raw, qfq, d0, eligible)
     assert result.triggered
 
@@ -87,30 +87,44 @@ def test_third_unfilled_gap_is_exhaustion(d0):
 
 
 @pytest.mark.parametrize(
-    ("mutation", "reason"),
-    [
-        ("rise", "minimum_rise_return"),
-        ("platform", "maximum_platform_amplitude"),
-        ("platform_drift", "maximum_platform_drift"),
-        ("bearish", "bullish_candle"),
-        ("close_location", "minimum_close_location"),
-    ],
+    ("mutation", "reason"), [("bearish", "bullish_candle"), ("close_location", "minimum_close_location")]
 )
-def test_each_major_hard_filter_has_a_stable_reason(qualifying_frames, d0, eligible, mutation, reason):
+def test_structural_hard_filters_have_stable_reasons(qualifying_frames, d0, eligible, mutation, reason):
     raw, qfq = qualifying_frames
-    if mutation == "rise":
-        qfq.loc[qfq.index[:30], "close"] = 10.0
-    elif mutation == "platform":
-        raw.loc[raw.index[-5], ["high", "low"]] = [12.0, 9.0]
-    elif mutation == "platform_drift":
-        qfq.loc[qfq.index[-11], "close"] = 9.0
-    elif mutation == "bearish":
+    if mutation == "bearish":
         raw.loc[raw.index[-1], "open"] = 11.55
     else:
         raw.loc[raw.index[-1], "close"] = 10.90
     result = _detect(StrongGapUpStrategy(), raw, qfq, d0, eligible)
     assert not result.triggered
     assert reason in result.exclusion_reasons
+
+
+@pytest.mark.parametrize("mutation", ["rise", "platform", "platform_drift"])
+def test_shape_quality_no_longer_vetoes_short_gap(qualifying_frames, d0, eligible, mutation):
+    raw, qfq = qualifying_frames
+    if mutation == "rise":
+        qfq.loc[qfq.index[:30], "close"] = 10.0
+        expected_risk = "weak_prior_trend"
+    elif mutation == "platform":
+        raw.loc[raw.index[-5], ["high", "low"]] = [10.6, 9.0]
+        expected_risk = "wide_platform"
+    else:
+        qfq.loc[qfq.index[-11], "close"] = 9.0
+        expected_risk = "unstable_platform"
+    result = _detect(StrongGapUpStrategy(), raw, qfq, d0, eligible)
+    assert result.triggered
+    assert result.signal is not None
+    assert result.signal.candidate_tags == ["SHORT_GAP"]
+    assert expected_risk in result.signal.risk_flags
+
+
+def test_strict_gap_is_a_short_gap_subset(qualifying_frames, d0, eligible):
+    raw, qfq = qualifying_frames
+    result = _detect(StrongGapUpStrategy(), raw, qfq, d0, eligible)
+    assert result.signal is not None
+    assert result.signal.candidate_tags == ["SHORT_GAP", "STRICT_GAP"]
+    assert result.signal.gap_top == result.signal.gap_ceiling
 
 
 def test_adjusted_prices_never_define_gap_geometry(qualifying_frames, d0, eligible):

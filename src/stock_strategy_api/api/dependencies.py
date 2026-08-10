@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import Request
 
 from stock_strategy_api.core.clock import iso_now, now_shanghai
+from stock_strategy_api.market_data.calendar import CalendarService
 from stock_strategy_api.repositories.run_repository import RunRepository
 from stock_strategy_api.repositories.signal_repository import SignalRepository
 from stock_strategy_api.services.recommendation_service import RecommendationService
@@ -52,7 +53,13 @@ def response_meta(
     return meta
 
 
-def data_is_stale(request: Request, timestamp: str | None) -> bool:
+def data_is_stale(
+    request: Request,
+    timestamp: str | None,
+    *,
+    as_of: str | None = None,
+    require_current: bool = False,
+) -> bool:
     if not timestamp:
         return True
     try:
@@ -62,4 +69,18 @@ def data_is_stale(request: Request, timestamp: str | None) -> bool:
     if updated.tzinfo is None:
         return True
     age = now_shanghai() - updated
-    return age > dt.timedelta(hours=request.app.state.settings.data_freshness_hours)
+    if age > dt.timedelta(hours=request.app.state.settings.data_freshness_hours):
+        return True
+    if not require_current or not as_of:
+        return False
+    try:
+        calendar = CalendarService(request.app.state.settings.data_dir)
+        now = now_shanghai()
+        expected = (
+            now.date()
+            if calendar.is_trading_day(now.date()) and now.time() >= dt.time(15, 30)
+            else calendar.prev_trading_day(now.date())
+        )
+        return as_of != expected.isoformat()
+    except Exception:
+        return True

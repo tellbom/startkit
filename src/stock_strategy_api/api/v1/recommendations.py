@@ -19,7 +19,7 @@ router = APIRouter(tags=["recommendations"])
 def strategy_recommendations(
     strategy_id: str,
     request: Request,
-    state: SignalState | Literal["all"] = SignalState.CONFIRMED,
+    state: SignalState | Literal["all"] = SignalState.ENTRY_ELIGIBLE,
     phase: GapPhase | None = None,
     risk: Literal["exclude_exhaustion", "include_exhaustion"] = "exclude_exhaustion",
     as_of: dt.date | None = None,
@@ -46,7 +46,7 @@ def strategy_recommendations(
 def all_recommendations(
     request: Request,
     strategy_id: str | None = None,
-    state: SignalState | Literal["all"] = SignalState.CONFIRMED,
+    state: SignalState | Literal["all"] = SignalState.ENTRY_ELIGIBLE,
     phase: GapPhase | None = None,
     risk: Literal["exclude_exhaustion", "include_exhaustion"] = "exclude_exhaustion",
     as_of: dt.date | None = None,
@@ -90,7 +90,12 @@ def _list(
     if any("calendar_fallback_source" in row.risk_flags for row in rows):
         warnings.append("Results use the offline exchange calendar fallback; refresh before production use.")
     updated_at = latest.get("data_last_updated_at") if latest else None
-    stale = data_is_stale(request, updated_at)
+    stale = data_is_stale(
+        request,
+        updated_at,
+        as_of=latest_date,
+        require_current=requested_as_of is None,
+    )
     if stale:
         warnings.append("No sufficiently fresh successful scan is available for this query.")
     response_as_of = requested_as_of.isoformat() if requested_as_of else latest_date

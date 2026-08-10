@@ -8,8 +8,8 @@
 - 业务时区：`Asia/Shanghai`
 - 成功响应：`{"data": ..., "meta": ...}`
 - 错误响应：`{"code", "message", "details", "request_id"}`
-- `meta.stale=true` 表示没有可证明为当前的数据，不能解释为“今天没有推荐”。
-- 默认推荐仅包含 `confirmed`，并排除 `exhaustion_risk`。
+- 默认查询中，`meta.stale=true` 表示没有可证明为当前的数据，不能解释为“今天没有推荐”；显式历史 `as_of` 查询按指定交易日解释。
+- 默认推荐仅包含 D1 后的 `entry_eligible`，并排除 `exhaustion_risk`。
 
 ## 健康检查
 
@@ -51,14 +51,14 @@
 | 参数 | 默认值 | 含义 |
 |---|---|---|
 | `strategy_id` | 空 | 统一流可指定策略 |
-| `state` | `confirmed` | 生命周期状态，或 `all` |
+| `state` | `entry_eligible` | 生命周期状态，或 `all` |
 | `phase` | 空 | `persistent_candidate`, `accelerating_candidate`, `exhaustion_risk` |
 | `risk` | `exclude_exhaustion` | 传 `include_exhaustion` 显式查看衰竭风险 |
 | `as_of` | 最近成功扫描 | ISO 交易日期 |
 | `limit` | 50 | 1～200 |
 | `offset` | 0 | 分页偏移 |
 
-推荐记录包含策略/股票标识、D0/D3/D4 日期、状态、阶段、缺口边界、量价指标、前置形态、规则检查、排序分量、风险标记及数据质量。
+推荐记录包含策略/股票标识、D0/D1/D2 日期、SHORT/STRICT 标签、D1承接类型、状态、阶段、冻结缺口边界、D0+D1排序分量、风险标记及数据质量。
 
 示例结构：
 
@@ -67,26 +67,29 @@
   "data": [
     {
       "strategy_id": "strong_gap_up_v1",
-      "strategy_version": "1.0.0",
+      "strategy_version": "2.0.0",
       "symbol": "600000",
       "stock_name": "浦发银行",
       "signal_date": "2026-06-30",
-      "confirmation_date": "2026-07-03",
-      "earliest_entry_date": "2026-07-06",
-      "state": "confirmed",
+      "confirmation_date": "2026-07-01",
+      "earliest_entry_date": "2026-07-02",
+      "entry_eligible_until": "2026-07-02",
+      "state": "entry_eligible",
+      "candidate_tags": ["SHORT_GAP", "STRICT_GAP"],
+      "d1_confirmation": "fully_unfilled",
       "phase": "persistent_candidate",
       "gap_floor": 10.6,
-      "gap_ceiling": 10.8,
+      "gap_top": 10.8,
       "gap_pct": 0.018868,
       "volume_ratio": 3.0,
       "rule_score": 71.2,
       "recommendation_kind": "rule_based_observation",
       "risk_disclosure": "规则筛选结果仅供研究观察，不构成投资建议或收益承诺。",
-      "as_of_trade_date": "2026-07-03"
+      "as_of_trade_date": "2026-07-01"
     }
   ],
   "meta": {
-    "as_of_trade_date": "2026-07-03",
+    "as_of_trade_date": "2026-07-01",
     "stale": false,
     "warnings": [],
     "total": 1,
@@ -126,7 +129,7 @@
 
 ### `GET /api/v1/stocks/{symbol}/recommendations`
 
-返回某只股票的全部策略状态历史，包含观察、失效、确认和衰竭风险。
+返回某只股票的全部策略状态历史，包含 D0 待确认、D1弱承接、交易资格、失效、过期和衰竭风险。
 
 ## 回测
 
@@ -136,7 +139,7 @@
 
 ### `GET /api/v1/backtests/{run_id}`
 
-返回配置、成本、样本数、固定 1/3/5/10 交易日事件收益和主退出规则结果。
+返回配置、成本、样本数、固定1/2/3/4/5交易日事件收益、MFE、MAE、缺口回补率、SHORT/STRICT、D1承接和入场延迟分组结果。
 `production_verified` 只有在股票池和证券状态均为完整 PIT 数据时才可能为 `true`；同时返回 PIT 日期覆盖率。
 
 ### `GET /api/v1/backtests/{run_id}/events`

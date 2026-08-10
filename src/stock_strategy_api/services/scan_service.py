@@ -45,6 +45,10 @@ class ScanService:
             advanced_signals = self._compute_advances(strategy, as_of)
             pending_signals.extend(advanced_signals)
             stats["advanced"] = len(advanced_signals)
+            for signal in advanced_signals:
+                stats[f"advanced:{signal.state.value}"] += 1
+                if signal.d1_confirmation:
+                    stats[f"d1:{signal.d1_confirmation.value}"] += 1
             for symbol in universe.symbols:
                 raw = self.ohlcv.load(symbol, "raw")
                 qfq = self.ohlcv.load(symbol, "qfq")
@@ -82,6 +86,8 @@ class ScanService:
                     detection.signal.data_last_updated_at = iso_now()
                     pending_signals.append(detection.signal)
                     stats["triggered"] += 1
+                    for tag in detection.signal.candidate_tags:
+                        stats[f"candidate:{tag}"] += 1
                 else:
                     stats["not_triggered"] += 1
                     for reason in detection.exclusion_reasons:
@@ -167,9 +173,14 @@ class ScanService:
 
     def _compute_advances(self, strategy: Strategy, as_of: dt.date) -> list:
         updates = []
-        for _signal_id, signal in self.signals.active(strategy.metadata().strategy_id):
+        metadata = strategy.metadata()
+        for _signal_id, signal in self.signals.active(
+            metadata.strategy_id,
+            strategy_version=metadata.version,
+            config_hash=strategy.config_hash(),
+        ):
             raw = self.ohlcv.load(signal.symbol, "raw")
             next_signal = strategy.advance(signal, raw, self.calendar, as_of)
-            if next_signal.state != signal.state or next_signal.observed_dates != signal.observed_dates:
+            if next_signal != signal:
                 updates.append(next_signal)
         return updates

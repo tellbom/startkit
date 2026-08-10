@@ -3,6 +3,8 @@
 > 依据：[短线化策略调整计划](short_gap_adjustment_plan.md)
 >
 > 本文只规定策略行为、交付顺序和验收证据，不规定类、函数或文件组织。开发 Agent 不得重新设计策略，不得在未裁决项上自行增加指标或宣称参数最优。
+>
+> 当前状态：`implemented=yes, fixture_verified=yes, api_verified=yes, pit_backtest_verified=no`。SG-05最终阶段切分和PIT参数裁决仍未完成。
 
 ## 1. 交付原则
 

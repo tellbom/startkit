@@ -84,7 +84,7 @@ def _install_fixture(data_root, qualifying_frames, d0):
     return calendar
 
 
-def test_scan_then_three_day_confirmation(tmp_path, qualifying_frames, d0):
+def test_scan_then_d1_confirmation(tmp_path, qualifying_frames, d0):
     calendar = _install_fixture(tmp_path, qualifying_frames, d0)
     database = Database(tmp_path / "strategy.sqlite3")
     database.initialize()
@@ -96,11 +96,11 @@ def test_scan_then_three_day_confirmation(tmp_path, qualifying_frames, d0):
     replay = service.scan(strategy, d0)
     assert replay["run_id"] == result["run_id"]
     assert replay["idempotent_replay"] is True
-    d3 = calendar.nth_trading_day_after(d0, 3)
-    assert service.advance(strategy, d3)["updated"] == 1
-    rows, total = signals.list_signals(state="confirmed", include_exhaustion=True)
+    d1 = calendar.next_trading_day(d0)
+    assert service.advance(strategy, d1)["updated"] == 1
+    rows, total = signals.list_signals(state="entry_eligible", include_exhaustion=True)
     assert total == 1
-    assert rows[0].earliest_entry_date == calendar.nth_trading_day_after(d0, 4)
+    assert rows[0].earliest_entry_date == calendar.nth_trading_day_after(d0, 2)
 
 
 def test_fixture_full_chain_scan_api_and_t1_backtest(tmp_path, qualifying_frames, d0):
@@ -115,20 +115,21 @@ def test_fixture_full_chain_scan_api_and_t1_backtest(tmp_path, qualifying_frames
     scanner = ScanService(data_root, runs, signals)
 
     assert scanner.scan(strategy, d0)["triggered"] == 1
-    d3 = calendar.nth_trading_day_after(d0, 3)
-    assert scanner.advance(strategy, d3)["updated"] == 1
+    d1 = calendar.next_trading_day(d0)
+    assert scanner.advance(strategy, d1)["updated"] == 1
 
     settings = Settings(data_dir=data_root, database_path=database_path)
     with TestClient(create_app(settings)) as client:
         response = client.get("/api/v1/recommendations")
         assert response.status_code == 200
         assert response.json()["meta"]["total"] == 1
-        assert response.json()["data"][0]["state"] == "confirmed"
+        assert response.json()["data"][0]["state"] == "entry_eligible"
+        assert response.json()["data"][0]["earliest_entry_date"] == calendar.nth_trading_day_after(d0, 2).isoformat()
 
-    result = BacktestService(data_root, runs).run(strategy, d0, d3)
+    result = BacktestService(data_root, runs).run(strategy, d0, d1)
     event = runs.backtest_events(result["run_id"], 10, 0)[0][0]
-    assert event["state_path"][-1]["state"] == "confirmed"
-    assert event["entry_date"] == calendar.nth_trading_day_after(d0, 4).isoformat()
+    assert event["state_path"][-1]["state"] == "entry_eligible"
+    assert event["entry_date"] == calendar.nth_trading_day_after(d0, 2).isoformat()
     assert event["exit_date"] > event["entry_date"]
     assert event["horizon_returns"]["1"]["net_return"] < event["horizon_returns"]["1"]["gross_return"]
 
@@ -162,14 +163,14 @@ def test_recent_scan_backfills_d0_even_when_latest_day_already_succeeded(tmp_pat
     signals = SignalRepository(database)
     service = ScanService(tmp_path, runs, signals)
     strategy = StrongGapUpStrategy()
-    d3 = calendar.nth_trading_day_after(d0, 3)
+    d1 = calendar.next_trading_day(d0)
 
-    service.scan(strategy, d3)
-    result = service.scan_recent(strategy, d3)
+    service.scan(strategy, d1)
+    result = service.scan_recent(strategy, d1)
 
-    assert result["lookback_trading_days"] == 7
-    assert result["scanned_dates"] == [day.isoformat() for day in calendar.trading_days_ending_on(d3, 7)]
-    rows, total = signals.list_signals(state="confirmed", include_exhaustion=True)
+    assert result["lookback_trading_days"] == 3
+    assert result["scanned_dates"] == [day.isoformat() for day in calendar.trading_days_ending_on(d1, 3)]
+    rows, total = signals.list_signals(state="entry_eligible", include_exhaustion=True)
     assert total == 1
     assert rows[0].signal_date == d0
-    assert rows[0].confirmation_date == d3
+    assert rows[0].confirmation_date == d1

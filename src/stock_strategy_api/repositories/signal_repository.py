@@ -211,13 +211,27 @@ class SignalRepository:
             ).fetchall()
         return [StrategySignal.model_validate_json(row["payload_json"]) for row in rows], total
 
-    def active(self, strategy_id: str) -> list[tuple[int, StrategySignal]]:
-        terminal = ("invalidated", "indeterminate", "expired")
+    def active(
+        self,
+        strategy_id: str,
+        *,
+        strategy_version: str | None = None,
+        config_hash: str | None = None,
+    ) -> list[tuple[int, StrategySignal]]:
+        terminal = ("invalidated", "indeterminate", "expired", "weak_d1")
         placeholders = ",".join("?" for _ in terminal)
+        clauses = ["strategy_id=?", f"state NOT IN ({placeholders})"]
+        parameters: list[str] = [strategy_id, *terminal]
+        if strategy_version:
+            clauses.append("strategy_version=?")
+            parameters.append(strategy_version)
+        if config_hash:
+            clauses.append("config_hash=?")
+            parameters.append(config_hash)
         with self.database.connect() as connection:
             rows = connection.execute(
-                f"SELECT signal_id, payload_json FROM signals WHERE strategy_id=? AND state NOT IN ({placeholders})",
-                (strategy_id, *terminal),
+                f"SELECT signal_id, payload_json FROM signals WHERE {' AND '.join(clauses)}",
+                parameters,
             ).fetchall()
         return [(int(row["signal_id"]), StrategySignal.model_validate_json(row["payload_json"])) for row in rows]
 

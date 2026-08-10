@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync = commands.add_parser("sync-data", help="Synchronize calendar, CSI300, security and OHLCV data")
     sync.add_argument("--as-of", required=True)
 
-    scan = commands.add_parser("scan", help="Backfill recent trading days and advance signals through D3")
+    scan = commands.add_parser("scan", help="Backfill recent trading days and advance signals through D1 qualification")
     scan.add_argument("--strategy", required=True)
     scan.add_argument("--as-of", required=True)
     scan.add_argument(
@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    advance = commands.add_parser("advance-signals", help="Advance D1-D3 signal lifecycle")
+    advance = commands.add_parser("advance-signals", help="Advance D1 qualification and entry-window lifecycle")
     advance.add_argument("--strategy", default="strong_gap_up_v1")
     advance.add_argument("--as-of", required=True)
 

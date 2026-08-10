@@ -66,7 +66,7 @@ class StrongGapUpStrategy(Strategy):
             raw_bars,
             calendar,
             as_of,
-            max_entry_wait_days=self.config.max_entry_wait_days,
+            self.config,
         )
 
 

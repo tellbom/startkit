@@ -17,6 +17,8 @@ class SignalState(StrEnum):
     WATCHING_D1 = "watching_d1"
     WATCHING_D2 = "watching_d2"
     PARTIALLY_FILLED = "partially_filled"
+    WEAK_D1 = "weak_d1"
+    ENTRY_ELIGIBLE = "entry_eligible"
     CONFIRMED = "confirmed"
     INVALIDATED = "invalidated"
     INDETERMINATE = "indeterminate"
@@ -27,6 +29,14 @@ class GapPhase(StrEnum):
     PERSISTENT = "persistent_candidate"
     ACCELERATING = "accelerating_candidate"
     EXHAUSTION = "exhaustion_risk"
+
+
+class D1Confirmation(StrEnum):
+    FULLY_UNFILLED = "fully_unfilled"
+    PARTIAL_RECLAIMED = "partial_reclaimed"
+    PARTIAL_WEAK = "partial_weak"
+    FULLY_FILLED = "fully_filled"
+    INDETERMINATE = "indeterminate"
 
 
 class RuleCheck(BaseModel):
@@ -65,6 +75,7 @@ class StrategySignal(BaseModel):
     risk_flags: list[str] = Field(default_factory=list)
     gap_floor: float
     gap_ceiling: float
+    gap_top: float | None = None
     gap_pct: float
     remaining_gap_pct: float = 1.0
     open: float
@@ -79,10 +90,18 @@ class StrategySignal(BaseModel):
     platform_amplitude: float
     platform_drift: float
     rule_score: float
+    d0_score: float | None = None
+    d1_score: float | None = None
     score_components: dict[str, float]
     rule_checks: list[RuleCheck]
     reasons: list[str]
     invalidated_date: dt.date | None = None
+    entry_eligible_until: dt.date | None = None
+    candidate_tags: list[str] = Field(default_factory=list)
+    d1_confirmation: D1Confirmation | None = None
+    d1_gap_retention: float | None = None
+    d1_close_location: float | None = None
+    d1_stability: float | None = None
     observed_dates: list[dt.date] = Field(default_factory=list)
     data_last_updated_at: str | None = None
     calendar_source: str | None = None

@@ -13,15 +13,27 @@
 
 ### 静态与离线测试
 
-- `ruff check src tests`：通过。
-- `pytest`：75 项通过。
-- `pytest --cov=stock_strategy_api`：通过，语句覆盖率 81%。
+- `ruff check src tests scripts`：通过。
+- `pytest`：82 项通过。
+- `pytest --cov=stock_strategy_api`：通过，语句覆盖率 82%。
 - `python -m compileall -q src tests`：通过。
 - 独立目录验收：复制源码到 `/tmp/startkit-final-qa.EgojpO`，创建全新虚拟环境后可独立安装，基线测试与 Ruff 均通过；TestClient 成功读取独立构造的 fixture 推荐 `600000`。
 - 范围审计：业务源码/测试中无旧项目绝对路径、`sys.path`、`quant_platform`、软链接或禁用机器学习依赖。
-- 覆盖内容：股票代码、Parquet schema/原子写、交易日历、CSI300 有效期与快照质量、ST/退市/上市 60 日/北交所/停牌过滤、D0 检测、防未来数据、1% 缺口边界、成交量基准、部分/完整回补、D1～D3、阶段风险、SQLite 幂等/事务回滚/历史状态查询、API 默认过滤与错误契约、D4 入场、不可成交、T+1 退出、成本和 PIT 门禁。
+- 覆盖内容：股票代码、Parquet schema/原子写、交易日历、CSI300 有效期与快照质量、ST/退市/上市60日/北交所/停牌过滤、防未来数据、0.5% SHORT_GAP 边界、STRICT_GAP 子集、趋势/平台质量降级、D1五类承接、D2/D3配置化入场、4/5日退出、1～5日收益、MFE/MAE、旧版本隔离、SQLite幂等/事务回滚/历史状态查询、API默认过滤与错误契约、不可成交、T+1退出、成本和PIT门禁。
 
-### 真实网络 smoke test
+### v2 短线化真实数据与 API 验证
+
+验证行情截至日：2026-08-10。
+
+- CSI300 成分300只；raw/qfq共600个行情数据集全部更新至2026-08-10。顺序同步遇到大量间歇SSL/代理错误后，使用项目内进程隔离脚本增量补齐；最终日期审计缺失数为0。
+- 新策略版本为 `2.0.0`。默认 SHORT_GAP 入口为0.5%缺口、1.5倍量比；原1%缺口、2倍量比及严格趋势平台口径作为 STRICT_GAP 子集标签。阶段分类仍携带 `fixed_window_phase_v0`，尚未冒充最终“同一上涨阶段”裁决。
+- 默认补扫窗口按 `confirmation_days + max_entry_wait_days + 1` 计算为3个交易日，本次依次处理2026-08-06、08-07、08-10。08-06有1个历史D0候选，08-07和08-10均无新D0触发；08-10将历史候选推进出入场窗口。
+- 启动真实Uvicorn后通过HTTP调用：`/readyz` 返回200，`expected_trade_date=latest_scan_date=2026-08-10`；默认 `/api/v1/recommendations` 返回 `total=0`、`stale=false`。因此截至08-10收盘没有仍具交易资格的推荐股票。
+- 显式查询全部状态可见3条历史SHORT_GAP：中钨高新 `000657`（D0=08-06，D1完全未回补，原D2=08-10）、藏格矿业 `000408` 与北方稀土 `600111`（D0=08-05，原D2=08-07）；三者均为 `expired`，没有被默认API继续作为可买候选。
+- 当前快照开发回测区间2026-07-01至07-28，run `02abbb1dc3fa4ea791d1652f8b46420f`：7个D0候选均取得D1交易资格并在D2成交；其中6个D1缺口完全未补、1个部分回补后收回，D2开盘前缺口破坏的候选不会虚构成交。1～5日、MFE/MAE、SHORT/STRICT、D1承接、阶段和入场延迟分组均成功输出。
+- 上述回测使用 `current_snapshot`，`survivorship_bias=true`、证券主数据PIT覆盖率0、`production_verified=false`。7个样本只能证明代码和指标链路，不能据此认定0.5%/1.5倍、部分回补、4/5日退出或评分权重有效。
+
+### v1 历史真实网络 smoke test
 
 验证行情截至日：2026-08-07（当前会话日期 2026-08-10 可用数据的最近完整交易日）。
 

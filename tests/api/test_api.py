@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import datetime as dt
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
+from stock_strategy_api.api import dependencies
+from stock_strategy_api.api.dependencies import data_is_stale
 from stock_strategy_api.core.config import Settings
 from stock_strategy_api.main import create_app
 from stock_strategy_api.market_data.calendar import CalendarService
@@ -10,14 +15,14 @@ from stock_strategy_api.strategies.strong_gap_up_v1 import StrongGapUpStrategy
 from tests.conftest import build_calendar_frame
 
 
-def _confirmed_signal(qualifying_frames, d0, eligible):
+def _entry_eligible_signal(qualifying_frames, d0, eligible):
     raw, qfq = qualifying_frames
     result = StrongGapUpStrategy().detect(
         raw, qfq, d0, eligible, universe_mode="point_in_time", survivorship_bias=False, calendar_source="fixture"
     )
     assert result.signal
     signal = result.signal
-    signal.state = SignalState.CONFIRMED
+    signal.state = SignalState.ENTRY_ELIGIBLE
     signal.confirmation_date = d0
     return signal
 
@@ -29,7 +34,7 @@ def test_strategy_and_recommendation_contract(tmp_path, qualifying_frames, d0, e
         assert strategy_response.status_code == 200
         assert strategy_response.json()["data"][0]["strategy_id"] == "strong_gap_up_v1"
         assert "properties" in strategy_response.json()["data"][0]["config_schema"]
-        client.app.state.signals.upsert(_confirmed_signal(qualifying_frames, d0, eligible))
+        client.app.state.signals.upsert(_entry_eligible_signal(qualifying_frames, d0, eligible))
         response = client.get("/api/v1/recommendations")
         assert response.status_code == 200
         body = response.json()
@@ -81,7 +86,7 @@ def test_empty_recommendations_are_distinct_from_service_error(tmp_path):
 def test_exhaustion_is_hidden_by_default_and_available_explicitly(tmp_path, qualifying_frames, d0, eligible):
     settings = Settings(data_dir=tmp_path / "data", database_path=tmp_path / "data" / "strategy.sqlite3")
     with TestClient(create_app(settings)) as client:
-        signal = _confirmed_signal(qualifying_frames, d0, eligible)
+        signal = _entry_eligible_signal(qualifying_frames, d0, eligible)
         signal.phase = GapPhase.EXHAUSTION
         signal.risk_flags.append("exhaustion_risk")
         client.app.state.signals.upsert(signal)
@@ -93,7 +98,7 @@ def test_exhaustion_is_hidden_by_default_and_available_explicitly(tmp_path, qual
 def test_non_default_lifecycle_state_requires_explicit_filter(tmp_path, qualifying_frames, d0, eligible):
     settings = Settings(data_dir=tmp_path / "data", database_path=tmp_path / "data" / "strategy.sqlite3")
     with TestClient(create_app(settings)) as client:
-        signal = _confirmed_signal(qualifying_frames, d0, eligible)
+        signal = _entry_eligible_signal(qualifying_frames, d0, eligible)
         signal.state = SignalState.WATCHING_D1
         client.app.state.signals.upsert(signal)
         assert client.get("/api/v1/recommendations").json()["meta"]["total"] == 0
@@ -137,3 +142,15 @@ def test_readiness_is_distinct_from_process_health(tmp_path):
         assert readiness.status_code == 503
         assert readiness.json()["status"] == "not_ready"
         assert readiness.json()["checks"]["successful_scan"] is False
+
+
+def test_default_query_marks_an_old_trade_date_stale_but_historical_query_does_not(tmp_path, monkeypatch):
+    data_root = tmp_path / "data"
+    CalendarService(data_root).save_fixture(build_calendar_frame(dt.date(2026, 8, 3), periods=10))
+    settings = Settings(data_dir=data_root, database_path=data_root / "strategy.sqlite3")
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
+    now = dt.datetime(2026, 8, 10, 20, 0, tzinfo=dt.timezone(dt.timedelta(hours=8)))
+    monkeypatch.setattr(dependencies, "now_shanghai", lambda: now)
+
+    assert data_is_stale(request, now.isoformat(), as_of="2026-08-07", require_current=True)
+    assert not data_is_stale(request, now.isoformat(), as_of="2026-08-07", require_current=False)

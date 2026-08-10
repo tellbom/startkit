@@ -34,7 +34,12 @@ def stock_recommendations(
             request,
             as_of=as_of,
             data_last_updated_at=latest.get("data_last_updated_at") if latest else None,
-            stale=data_is_stale(request, latest.get("data_last_updated_at") if latest else None),
+            stale=data_is_stale(
+                request,
+                latest.get("data_last_updated_at") if latest else None,
+                as_of=as_of,
+                require_current=True,
+            ),
             total=total,
             limit=limit,
             offset=offset,

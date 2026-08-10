@@ -16,9 +16,9 @@ def test_parser_exposes_required_commands():
 
 def test_custom_config_changes_hash(tmp_path):
     config = tmp_path / "config.json"
-    config.write_text(json.dumps({"minimum_gap_pct": 0.02}), encoding="utf-8")
+    config.write_text(json.dumps({"minimum_gap_pct": 0.006}), encoding="utf-8")
     strategy = _configured_strategy("strong_gap_up_v1", str(config), get_registry())
-    assert strategy.config.minimum_gap_pct == 0.02
+    assert strategy.config.minimum_gap_pct == 0.006
     assert strategy.config_hash() != get_registry().get("strong_gap_up_v1").config_hash()
 
 

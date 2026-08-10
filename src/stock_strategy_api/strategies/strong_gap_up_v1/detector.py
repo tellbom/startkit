@@ -9,7 +9,7 @@ from stock_strategy_api.market_data.security_master import EligibilityResult
 from stock_strategy_api.strategies.base import DetectionResult, RuleCheck, SignalState, StrategySignal
 from stock_strategy_api.strategies.strong_gap_up_v1.config import StrongGapConfig
 from stock_strategy_api.strategies.strong_gap_up_v1.manifest import METADATA
-from stock_strategy_api.strategies.strong_gap_up_v1.scoring import build_rule_score, classify_phase
+from stock_strategy_api.strategies.strong_gap_up_v1.scoring import build_d0_score, classify_phase
 
 
 def detect_signal(
@@ -69,10 +69,17 @@ def detect_signal(
         abs(float(qfq_platform.iloc[-1]["close"]) / platform_first - 1) if platform_first > 0 else float("inf")
     )
     platform_high = float(platform["high"].max())
+    breakout_pct = float(d0["close"]) / platform_high - 1 if platform_high > 0 else -1.0
 
     checks = [
         _check("gap_geometry", gap_ceiling > gap_floor, gap_ceiling, ">", gap_floor),
-        _check("minimum_gap_pct", gap_pct >= config.minimum_gap_pct, gap_pct, ">=", config.minimum_gap_pct),
+        _check(
+            "minimum_gap_pct",
+            gap_pct + 1e-12 >= config.minimum_gap_pct,
+            gap_pct,
+            ">=",
+            config.minimum_gap_pct,
+        ),
         _check(
             "minimum_volume_ratio",
             volume_ratio >= config.minimum_volume_ratio,
@@ -117,19 +124,40 @@ def detect_signal(
             config.maximum_platform_drift,
         ),
     ]
-    failed = [check.name for check in checks if not check.passed]
+    hard_checks = {
+        "gap_geometry",
+        "minimum_gap_pct",
+        "minimum_volume_ratio",
+        "bullish_candle",
+        "minimum_close_location",
+        "platform_breakout",
+    }
+    failed = [check.name for check in checks if check.name in hard_checks and not check.passed]
     if failed:
         return DetectionResult(triggered=False, checks=checks, exclusion_reasons=failed)
 
     phase = classify_phase(raw, as_of, config)
-    score, components = build_rule_score(
+    score, components = build_d0_score(
         gap_pct=gap_pct,
         volume_ratio=volume_ratio,
         close_location=close_location,
         rise_return=rise_return,
         platform_amplitude=platform_amplitude,
+        platform_drift=platform_drift,
+        breakout_pct=breakout_pct,
+        phase=phase,
         config=config,
     )
+    strict_gap = (
+        gap_pct + 1e-12 >= config.strict_minimum_gap_pct
+        and volume_ratio >= config.strict_minimum_volume_ratio
+        and rise_return >= config.minimum_rise_return
+        and platform_amplitude <= config.maximum_platform_amplitude
+        and platform_drift <= config.maximum_platform_drift
+    )
+    candidate_tags = ["SHORT_GAP"]
+    if strict_gap:
+        candidate_tags.append("STRICT_GAP")
     risk_flags: list[str] = []
     if one_price:
         risk_flags.append("one_price_limit_risk")
@@ -139,6 +167,13 @@ def detect_signal(
         risk_flags.append("late_trend_risk")
     elif phase.value == "exhaustion_risk":
         risk_flags.extend(["late_trend_risk", "exhaustion_risk"])
+    risk_flags.append("fixed_window_phase_v0")
+    if rise_return < config.minimum_rise_return:
+        risk_flags.append("weak_prior_trend")
+    if platform_amplitude > config.maximum_platform_amplitude:
+        risk_flags.append("wide_platform")
+    if platform_drift > config.maximum_platform_drift:
+        risk_flags.append("unstable_platform")
     security = eligibility.security
     assert security is not None
     signal = StrategySignal(
@@ -153,6 +188,7 @@ def detect_signal(
         risk_flags=risk_flags,
         gap_floor=gap_floor,
         gap_ceiling=gap_ceiling,
+        gap_top=gap_ceiling,
         gap_pct=gap_pct,
         open=float(d0["open"]),
         high=float(d0["high"]),
@@ -166,9 +202,11 @@ def detect_signal(
         platform_amplitude=platform_amplitude,
         platform_drift=platform_drift,
         rule_score=score,
-        score_components=components,
+        d0_score=score,
+        score_components={f"d0_{key}": value for key, value in components.items()},
         rule_checks=checks,
-        reasons=["upward_gap", "volume_expansion", "prior_rise", "tight_platform", "three_day_confirmation_pending"],
+        candidate_tags=candidate_tags,
+        reasons=["short_gap_candidate", "upward_gap", "volume_expansion", "strong_close", "d1_confirmation_pending"],
         calendar_source=calendar_source,
         universe_mode=universe_mode,
         survivorship_bias=survivorship_bias,

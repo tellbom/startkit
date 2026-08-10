@@ -16,7 +16,7 @@ class RecommendationService:
         self,
         *,
         strategy_id: str | None = None,
-        state: str | None = "confirmed",
+        state: str | None = "entry_eligible",
         phase: str | None = None,
         symbol: str | None = None,
         as_of: dt.date | None = None,

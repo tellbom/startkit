@@ -74,6 +74,24 @@ def test_new_config_hash_never_overwrites_old_signal(tmp_path, qualifying_frames
     assert repository.list_signals(include_exhaustion=True)[1] == 2
 
 
+def test_active_signals_are_isolated_by_version_and_config(tmp_path, qualifying_frames, d0, eligible):
+    database = Database(tmp_path / "result.sqlite3")
+    database.initialize()
+    repository = SignalRepository(database)
+    current = _signal(qualifying_frames, d0, eligible)
+    legacy = current.model_copy(update={"strategy_version": "1.0.0", "config_hash": "legacy-config"})
+    repository.upsert_many([current, legacy])
+
+    active = repository.active(
+        current.strategy_id,
+        strategy_version=current.strategy_version,
+        config_hash=current.config_hash,
+    )
+
+    assert len(active) == 1
+    assert active[0][1].strategy_version == "2.0.0"
+
+
 def test_signal_pagination_has_stable_non_overlapping_pages(tmp_path, qualifying_frames, d0, eligible):
     database = Database(tmp_path / "result.sqlite3")
     database.initialize()
