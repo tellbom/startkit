@@ -69,8 +69,15 @@ class BacktestService:
             "costs": self.costs.to_dict(),
             "entry_rule": (
                 "first tradable open from D2; "
-                f"maximum {strategy.config_snapshot()['max_entry_wait_days']} trading day(s)"
+                f"maximum {strategy.config_snapshot()['max_entry_wait_days']} trading day(s) for execution rollover; "
+                "independent D3 continuation entry requires D2 close re-evaluation"
             ),
+            "continuation_rule": {
+                "maximum_d2_expansion": strategy.config_snapshot()["continuation_max_expansion"],
+                "minimum_d2_close_location": strategy.config_snapshot()["continuation_minimum_close_location"],
+                "requires_close_at_or_above_gap_top": True,
+                "excludes_exhaustion_phase": True,
+            },
             "exit_rule": (
                 "next tradable open after full fill subject to T+1; otherwise "
                 f"D+{strategy.config_snapshot()['max_holding_days']} close"
@@ -94,6 +101,13 @@ class BacktestService:
             "indeterminate": 0,
             "unfilled_entry": 0,
             "invalidated_before_entry": 0,
+            "continuation_watch": 0,
+            "continuation_entry": 0,
+            "continuation_invalidated": 0,
+            "continuation_rejected_overextended": 0,
+            "continuation_rejected_exhaustion": 0,
+            "continuation_rejected_weak_d2_close": 0,
+            "continuation_rejected_d2_close_below_gap_top": 0,
         }
         all_security_pit = end_security_pit
         security_pit_days = 0
@@ -170,6 +184,41 @@ class BacktestService:
                     elif event["status"] == "invalidated_before_entry":
                         counts["invalidated_before_entry"] += 1
                     events.append(event)
+                    d2 = self.calendar.next_trading_day(signal.confirmation_date)
+                    if d2 > end_date:
+                        continue
+                    continuation_signal = strategy.advance(signal, raw, self.calendar, d2)
+                    continuation_path = [
+                        *state_path,
+                        {"date": d2.isoformat(), "state": continuation_signal.state.value},
+                    ]
+                    if continuation_signal.state == SignalState.INVALIDATED:
+                        counts["continuation_invalidated"] += 1
+                        continue
+                    if continuation_signal.state == SignalState.EXPIRED:
+                        reason = continuation_signal.entry_invalid_reason
+                        key = f"continuation_rejected_{reason}"
+                        if key in counts:
+                            counts[key] += 1
+                        continue
+                    if continuation_signal.state != SignalState.CONTINUATION_ENTRY:
+                        continue
+                    counts["continuation_watch"] += 1
+                    counts["continuation_entry"] += 1
+                    continuation_event = self._build_event(
+                        continuation_signal,
+                        raw,
+                        qfq,
+                        strategy.config_snapshot(),
+                        continuation_path,
+                        forced_entry_date=continuation_signal.continuation_entry_date,
+                        entry_kind="continuation_entry",
+                    )
+                    if continuation_event["status"] == "unfilled_entry":
+                        counts["unfilled_entry"] += 1
+                    elif continuation_event["status"] == "invalidated_before_entry":
+                        counts["invalidated_before_entry"] += 1
+                    events.append(continuation_event)
             metrics = self._metrics(events, counts)
             final_mode = "point_in_time" if universe_modes == {"point_in_time"} else "current_snapshot"
             metrics.update(
@@ -215,13 +264,24 @@ class BacktestService:
         qfq: pd.DataFrame,
         strategy_config: dict,
         state_path: list[dict[str, str]],
+        *,
+        forced_entry_date: dt.date | None = None,
+        entry_kind: str = "early_entry",
     ) -> dict[str, Any]:
         max_wait = int(strategy_config["max_entry_wait_days"])
         entry_date: dt.date | None = None
         entry_delay_trading_days: int | None = None
         invalidated_before_entry_date: dt.date | None = None
-        for offset in range(1, max_wait + 1):
-            candidate = self.calendar.nth_trading_day_after(signal.confirmation_date, offset)  # type: ignore[arg-type]
+        candidates = (
+            [(forced_entry_date, 2)]
+            if forced_entry_date is not None
+            else [
+                (self.calendar.nth_trading_day_after(signal.confirmation_date, offset), offset)  # type: ignore[arg-type]
+                for offset in range(1, max_wait + 1)
+            ]
+        )
+        for candidate, offset in candidates:
+            assert candidate is not None
             row = _bar(raw, candidate)
             if row is None or float(row["volume"]) <= 0:
                 continue
@@ -238,7 +298,10 @@ class BacktestService:
                 break
             entry_date = candidate
             entry_delay_trading_days = offset
+            if forced_entry_date is None and offset > 1:
+                entry_kind = "execution_rollover"
             break
+        comparison_pair_id = f"{signal.strategy_id}:{signal.symbol}:{signal.signal_date.isoformat()}"
         base = {
             "symbol": signal.symbol,
             "signal_date": signal.signal_date.isoformat(),
@@ -258,6 +321,16 @@ class BacktestService:
             "universe_mode": signal.universe_mode,
             "survivorship_bias": signal.survivorship_bias,
             "security_master_pit": signal.security_master_pit,
+            "comparison_pair_id": comparison_pair_id,
+            "entry_kind": entry_kind,
+            "structure_validity": signal.structure_validity,
+            "entry_validity": signal.entry_validity,
+            "entry_invalid_reason": signal.entry_invalid_reason,
+            "normal_entry_window_closed_date": (
+                signal.normal_entry_window_closed_date.isoformat() if signal.normal_entry_window_closed_date else None
+            ),
+            "d2_close_location": signal.d2_close_location,
+            "d2_expansion_from_d0_close": signal.d2_expansion_from_d0_close,
         }
         if entry_date is None:
             if invalidated_before_entry_date is not None:
@@ -480,6 +553,26 @@ class BacktestService:
                 )
                 for delay in (1, 2)
             },
+            "entry_kind_metrics": {
+                kind: _series_metrics(
+                    pd.Series(
+                        [event["net_return"] for event in filled if event.get("entry_kind") == kind],
+                        dtype=float,
+                    )
+                )
+                for kind in ("early_entry", "execution_rollover", "continuation_entry")
+            },
+            "comparison_pairs": len({event.get("comparison_pair_id") for event in events}),
+            "pairs_with_early_and_continuation": sum(
+                1
+                for pair_id in {event.get("comparison_pair_id") for event in events}
+                if {
+                    event.get("entry_kind")
+                    for event in events
+                    if event.get("comparison_pair_id") == pair_id and event.get("status") == "filled"
+                }
+                >= {"early_entry", "continuation_entry"}
+            ),
         }
 
 

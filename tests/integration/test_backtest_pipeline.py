@@ -116,6 +116,29 @@ def test_d3_delayed_entry_is_an_explicit_config_variant(tmp_path, qualifying_fra
 
     assert event["entry_date"] == calendar.nth_trading_day_after(d0, 3).isoformat()
     assert event["entry_delay_trading_days"] == 2
+    assert event["entry_kind"] == "execution_rollover"
+
+
+def test_backtest_keeps_paired_d2_early_and_d3_continuation_events(tmp_path, qualifying_frames, d0):
+    calendar = _install_fixture(tmp_path, qualifying_frames, d0)
+    database = Database(tmp_path / "strategy.sqlite3")
+    database.initialize()
+    runs = RunRepository(database)
+    d2 = calendar.nth_trading_day_after(d0, 2)
+
+    result = BacktestService(tmp_path, runs).run(StrongGapUpStrategy(), d0, d2)
+    events, total = runs.backtest_events(result["run_id"], 10, 0)
+
+    assert total == 2
+    assert {event["entry_kind"] for event in events} == {"early_entry", "continuation_entry"}
+    assert len({event["comparison_pair_id"] for event in events}) == 1
+    early = next(event for event in events if event["entry_kind"] == "early_entry")
+    continuation = next(event for event in events if event["entry_kind"] == "continuation_entry")
+    assert early["entry_date"] == d2.isoformat()
+    assert continuation["entry_date"] == calendar.next_trading_day(d2).isoformat()
+    assert continuation["d2_expansion_from_d0_close"] < 0.10
+    assert result["metrics"]["pairs_with_early_and_continuation"] == 1
+    assert result["metrics"]["entry_kind_metrics"]["continuation_entry"]["sample_size"] == 1
 
 
 def test_four_day_time_exit_is_versioned_by_config(tmp_path, qualifying_frames, d0):

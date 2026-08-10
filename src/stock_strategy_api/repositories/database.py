@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS backtest_events (
     run_id TEXT NOT NULL,
     symbol TEXT NOT NULL,
     signal_date TEXT NOT NULL,
+    entry_kind TEXT NOT NULL DEFAULT 'early_entry',
     phase TEXT NOT NULL,
     entry_date TEXT,
     exit_date TEXT,
@@ -95,12 +96,9 @@ CREATE TABLE IF NOT EXISTS backtest_events (
     gross_return REAL,
     net_return REAL,
     payload_json TEXT NOT NULL,
-    UNIQUE(run_id, symbol, signal_date),
+    UNIQUE(run_id, symbol, signal_date, entry_kind),
     FOREIGN KEY(run_id) REFERENCES backtest_runs(run_id)
 );
-
-CREATE INDEX IF NOT EXISTS ix_backtest_events_run
-ON backtest_events(run_id, signal_date, symbol);
 
 CREATE TABLE IF NOT EXISTS backtest_metrics (
     run_id TEXT NOT NULL,
@@ -120,6 +118,47 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            self._migrate_backtest_events_entry_kind(connection)
+            connection.execute(
+                """CREATE INDEX IF NOT EXISTS ix_backtest_events_run
+                ON backtest_events(run_id, signal_date, symbol, entry_kind)"""
+            )
+
+    @staticmethod
+    def _migrate_backtest_events_entry_kind(connection: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(backtest_events)")}
+        if "entry_kind" in columns:
+            return
+        connection.executescript(
+            """
+            DROP INDEX IF EXISTS ix_backtest_events_run;
+            ALTER TABLE backtest_events RENAME TO backtest_events_legacy;
+            CREATE TABLE backtest_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                signal_date TEXT NOT NULL,
+                entry_kind TEXT NOT NULL DEFAULT 'early_entry',
+                phase TEXT NOT NULL,
+                entry_date TEXT,
+                exit_date TEXT,
+                status TEXT NOT NULL,
+                gross_return REAL,
+                net_return REAL,
+                payload_json TEXT NOT NULL,
+                UNIQUE(run_id, symbol, signal_date, entry_kind),
+                FOREIGN KEY(run_id) REFERENCES backtest_runs(run_id)
+            );
+            INSERT INTO backtest_events (
+                event_id, run_id, symbol, signal_date, entry_kind, phase, entry_date, exit_date,
+                status, gross_return, net_return, payload_json
+            )
+            SELECT event_id, run_id, symbol, signal_date, 'early_entry', phase, entry_date, exit_date,
+                   status, gross_return, net_return, payload_json
+            FROM backtest_events_legacy;
+            DROP TABLE backtest_events_legacy;
+            """
+        )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

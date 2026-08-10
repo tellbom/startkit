@@ -42,7 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.signals = signal_repository
         application.state.runs = run_repository
         application.state.registry = strategy_registry
-        application.state.recommendations = RecommendationService(signal_repository, run_repository)
+        application.state.recommendations = RecommendationService(signal_repository, run_repository, strategy_registry)
         yield
 
     application = FastAPI(

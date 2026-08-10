@@ -113,7 +113,8 @@ class SignalRepository:
         self,
         *,
         strategy_id: str | None = None,
-        state: str | None = None,
+        current_strategies: tuple[tuple[str, str, str], ...] | None = None,
+        state: str | list[str] | tuple[str, ...] | None = None,
         phase: str | None = None,
         symbol: str | None = None,
         as_of: dt.date | None = None,
@@ -124,6 +125,7 @@ class SignalRepository:
         if as_of:
             return self._list_signals_as_of(
                 strategy_id=strategy_id,
+                current_strategies=current_strategies,
                 state=state,
                 phase=phase,
                 symbol=symbol,
@@ -136,9 +138,10 @@ class SignalRepository:
         if strategy_id:
             clauses.append("strategy_id=?")
             parameters.append(strategy_id)
+        if current_strategies:
+            _append_current_strategy_filter(clauses, parameters, "", current_strategies)
         if state:
-            clauses.append("state=?")
-            parameters.append(state)
+            _append_state_filter(clauses, parameters, "state", state)
         if phase:
             clauses.append("phase=?")
             parameters.append(phase)
@@ -166,7 +169,8 @@ class SignalRepository:
         self,
         *,
         strategy_id: str | None,
-        state: str | None,
+        current_strategies: tuple[tuple[str, str, str], ...] | None,
+        state: str | list[str] | tuple[str, ...] | None,
         phase: str | None,
         symbol: str | None,
         as_of: dt.date,
@@ -179,9 +183,10 @@ class SignalRepository:
         if strategy_id:
             clauses.append("s.strategy_id=?")
             parameters.append(strategy_id)
+        if current_strategies:
+            _append_current_strategy_filter(clauses, parameters, "s.", current_strategies)
         if state:
-            clauses.append("t.to_state=?")
-            parameters.append(state)
+            _append_state_filter(clauses, parameters, "t.to_state", state)
         if phase:
             clauses.append("s.phase=?")
             parameters.append(phase)
@@ -248,3 +253,28 @@ class SignalRepository:
 
 def _date(value: dt.date | None) -> str | None:
     return value.isoformat() if value else None
+
+
+def _append_state_filter(
+    clauses: list[str],
+    parameters: list[str],
+    column: str,
+    state: str | list[str] | tuple[str, ...],
+) -> None:
+    values = [state] if isinstance(state, str) else list(state)
+    placeholders = ",".join("?" for _ in values)
+    clauses.append(f"{column} IN ({placeholders})")
+    parameters.extend(values)
+
+
+def _append_current_strategy_filter(
+    clauses: list[str],
+    parameters: list[str],
+    prefix: str,
+    strategies: tuple[tuple[str, str, str], ...],
+) -> None:
+    filters = []
+    for strategy_id, version, config_hash in strategies:
+        filters.append(f"({prefix}strategy_id=? AND {prefix}strategy_version=? AND {prefix}config_hash=?)")
+        parameters.extend((strategy_id, version, config_hash))
+    clauses.append(f"({' OR '.join(filters)})")

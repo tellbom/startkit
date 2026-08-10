@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import sqlite3
 
 import pytest
 
@@ -19,6 +20,41 @@ def _signal(qualifying_frames, d0, eligible):
     )
     assert result.signal
     return result.signal
+
+
+def test_legacy_backtest_event_table_migrates_to_entry_kind_key(tmp_path):
+    path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """CREATE TABLE backtest_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                signal_date TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                entry_date TEXT,
+                exit_date TEXT,
+                status TEXT NOT NULL,
+                gross_return REAL,
+                net_return REAL,
+                payload_json TEXT NOT NULL,
+                UNIQUE(run_id, symbol, signal_date)
+            )"""
+        )
+
+    database = Database(path)
+    database.initialize()
+
+    with database.connect() as connection:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(backtest_events)")}
+        unique_indexes = [
+            row["name"] for row in connection.execute("PRAGMA index_list(backtest_events)") if row["unique"]
+        ]
+        indexed_columns = [
+            [item["name"] for item in connection.execute(f"PRAGMA index_info('{index}')")] for index in unique_indexes
+        ]
+    assert "entry_kind" in columns
+    assert ["run_id", "symbol", "signal_date", "entry_kind"] in indexed_columns
 
 
 def test_signal_upsert_is_idempotent_and_audited(tmp_path, qualifying_frames, d0, eligible):
@@ -89,7 +125,7 @@ def test_active_signals_are_isolated_by_version_and_config(tmp_path, qualifying_
     )
 
     assert len(active) == 1
-    assert active[0][1].strategy_version == "2.0.0"
+    assert active[0][1].strategy_version == "2.1.0"
 
 
 def test_signal_pagination_has_stable_non_overlapping_pages(tmp_path, qualifying_frames, d0, eligible):

@@ -19,9 +19,10 @@ router = APIRouter(tags=["recommendations"])
 def strategy_recommendations(
     strategy_id: str,
     request: Request,
-    state: SignalState | Literal["all"] = SignalState.ENTRY_ELIGIBLE,
+    state: SignalState | Literal["actionable", "all"] = "actionable",
     phase: GapPhase | None = None,
     risk: Literal["exclude_exhaustion", "include_exhaustion"] = "exclude_exhaustion",
+    version_scope: Literal["current", "all"] = "current",
     as_of: dt.date | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -33,10 +34,11 @@ def strategy_recommendations(
         request,
         service,
         strategy_id=strategy_id,
-        state=None if state == "all" else state.value,
+        state=_state_filter(state),
         phase=phase.value if phase else None,
         as_of=as_of,
         include_exhaustion=risk == "include_exhaustion",
+        include_legacy_versions=version_scope == "all",
         limit=limit,
         offset=offset,
     )
@@ -46,9 +48,10 @@ def strategy_recommendations(
 def all_recommendations(
     request: Request,
     strategy_id: str | None = None,
-    state: SignalState | Literal["all"] = SignalState.ENTRY_ELIGIBLE,
+    state: SignalState | Literal["actionable", "all"] = "actionable",
     phase: GapPhase | None = None,
     risk: Literal["exclude_exhaustion", "include_exhaustion"] = "exclude_exhaustion",
+    version_scope: Literal["current", "all"] = "current",
     as_of: dt.date | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -61,10 +64,11 @@ def all_recommendations(
         request,
         service,
         strategy_id=strategy_id,
-        state=None if state == "all" else state.value,
+        state=_state_filter(state),
         phase=phase.value if phase else None,
         as_of=as_of,
         include_exhaustion=risk == "include_exhaustion",
+        include_legacy_versions=version_scope == "all",
         limit=limit,
         offset=offset,
     )
@@ -112,3 +116,11 @@ def _list(
             offset=filters["offset"],
         ),
     }
+
+
+def _state_filter(state: SignalState | Literal["actionable", "all"]) -> str | tuple[str, ...] | None:
+    if state == "all":
+        return None
+    if state == "actionable":
+        return (SignalState.ENTRY_ELIGIBLE.value, SignalState.CONTINUATION_ENTRY.value)
+    return state.value

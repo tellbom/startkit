@@ -106,6 +106,26 @@ def test_non_default_lifecycle_state_requires_explicit_filter(tmp_path, qualifyi
         assert watching.json()["meta"]["total"] == 1
 
 
+def test_default_actionable_query_includes_continuation_entry(tmp_path, qualifying_frames, d0, eligible):
+    settings = Settings(data_dir=tmp_path / "data", database_path=tmp_path / "data" / "strategy.sqlite3")
+    with TestClient(create_app(settings)) as client:
+        signal = _entry_eligible_signal(qualifying_frames, d0, eligible)
+        signal.state = SignalState.CONTINUATION_ENTRY
+        signal.structure_validity = True
+        signal.entry_validity = True
+        signal.continuation_entry_date = d0 + dt.timedelta(days=1)
+        client.app.state.signals.upsert(signal)
+        legacy = signal.model_copy(update={"strategy_version": "2.0.0", "config_hash": "legacy"})
+        client.app.state.signals.upsert(legacy)
+
+        default = client.get("/api/v1/recommendations")
+        assert default.status_code == 200
+        assert default.json()["meta"]["total"] == 1
+        assert default.json()["data"][0]["state"] == "continuation_entry"
+        assert client.get("/api/v1/recommendations?state=entry_eligible").json()["meta"]["total"] == 0
+        assert client.get("/api/v1/recommendations?version_scope=all").json()["meta"]["total"] == 2
+
+
 def test_non_trading_as_of_and_pagination_errors_are_stable(tmp_path, d0):
     data_root = tmp_path / "data"
     CalendarService(data_root).save_fixture(build_calendar_frame(d0, periods=5))

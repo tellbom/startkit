@@ -19,6 +19,8 @@ class SignalState(StrEnum):
     PARTIALLY_FILLED = "partially_filled"
     WEAK_D1 = "weak_d1"
     ENTRY_ELIGIBLE = "entry_eligible"
+    CONTINUATION_WATCH = "continuation_watch"
+    CONTINUATION_ENTRY = "continuation_entry"
     CONFIRMED = "confirmed"
     INVALIDATED = "invalidated"
     INDETERMINATE = "indeterminate"
@@ -37,6 +39,12 @@ class D1Confirmation(StrEnum):
     PARTIAL_WEAK = "partial_weak"
     FULLY_FILLED = "fully_filled"
     INDETERMINATE = "indeterminate"
+
+
+class EntryKind(StrEnum):
+    NORMAL_D2 = "normal_d2"
+    EXECUTION_ROLLOVER = "execution_rollover"
+    CONTINUATION_D3 = "continuation_d3"
 
 
 class RuleCheck(BaseModel):
@@ -97,6 +105,16 @@ class StrategySignal(BaseModel):
     reasons: list[str]
     invalidated_date: dt.date | None = None
     entry_eligible_until: dt.date | None = None
+    structure_validity: bool = True
+    entry_validity: bool | None = None
+    entry_invalid_reason: str | None = None
+    entry_kind: EntryKind | None = None
+    execution_rollover_from_date: dt.date | None = None
+    normal_entry_window_closed_date: dt.date | None = None
+    continuation_watch_date: dt.date | None = None
+    continuation_entry_date: dt.date | None = None
+    d2_close_location: float | None = None
+    d2_expansion_from_d0_close: float | None = None
     candidate_tags: list[str] = Field(default_factory=list)
     d1_confirmation: D1Confirmation | None = None
     d1_gap_retention: float | None = None

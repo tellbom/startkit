@@ -24,6 +24,7 @@ def stock_recommendations(
         symbol=normalized,
         state=None,
         include_exhaustion=True,
+        include_legacy_versions=True,
         limit=limit,
         offset=offset,
     )

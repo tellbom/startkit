@@ -3,7 +3,9 @@ from __future__ import annotations
 import datetime as dt
 
 import pandas as pd
+import pytest
 
+from stock_strategy_api.core.errors import DataUnavailableError
 from stock_strategy_api.market_data.security_master import SecurityMasterService
 
 
@@ -59,3 +61,22 @@ def test_delisting_and_missing_bar_fail_closed(tmp_path):
     active_bar = {"open": 1, "high": 2, "low": 1, "close": 2, "volume": 100}
     assert "delisting_stock" in service.evaluate("600000", as_of, active_bar).reasons
     assert "missing_day_bar" in service.evaluate("600000", as_of, None).reasons
+
+
+def test_partial_exchange_fetch_does_not_overwrite_complete_snapshot(tmp_path, monkeypatch):
+    as_of = dt.date(2026, 6, 30)
+    service = SecurityMasterService(tmp_path)
+    complete = pd.DataFrame(
+        [
+            _snapshot("600000", "沪市", as_of - dt.timedelta(days=100), "sh"),
+            _snapshot("000001", "深市", as_of - dt.timedelta(days=100), "sz"),
+        ]
+    )
+    service.save_fixture(complete, as_of)
+    monkeypatch.setattr(SecurityMasterService, "_fetch_current", staticmethod(lambda _date: complete.iloc[:1]))
+
+    with pytest.raises(DataUnavailableError, match="snapshot is incomplete"):
+        service.fetch_and_save(as_of)
+
+    stored, _ = service.load_snapshot(as_of)
+    assert set(stored["exchange"]) == {"sh", "sz"}

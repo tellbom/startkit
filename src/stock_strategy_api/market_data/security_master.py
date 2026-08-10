@@ -43,6 +43,12 @@ class SecurityMasterService:
         frame = self._fetch_current(date)
         if frame.empty:
             raise DataUnavailableError("security master provider returned no rows")
+        exchanges = set(frame["exchange"].dropna().astype(str).str.lower())
+        if not {"sh", "sz"}.issubset(exchanges):
+            raise DataUnavailableError(
+                "security master snapshot is incomplete",
+                details={"required_exchanges": ["sh", "sz"], "actual_exchanges": sorted(exchanges)},
+            )
         atomic_write_parquet(frame, security_snapshot_path(self.data_root, date.isoformat()))
         return frame
 

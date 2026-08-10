@@ -133,7 +133,12 @@ class ScanService:
         as_of = as_date(value)
         if lookback_trading_days is None:
             config = strategy.config_snapshot()
-            lookback_trading_days = int(config["confirmation_days"]) + int(config["max_entry_wait_days"]) + 1
+            lookback_trading_days = (
+                int(config["confirmation_days"])
+                + int(config["max_entry_wait_days"])
+                + int(config.get("continuation_entry_days", 0))
+                + 1
+            )
         days = self.calendar.trading_days_ending_on(as_of, lookback_trading_days)
         daily_runs = []
         total_triggered = 0

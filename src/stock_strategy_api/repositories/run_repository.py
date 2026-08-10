@@ -118,7 +118,12 @@ class RunRepository:
             )
 
     def latest_successful_scan(
-        self, strategy_id: str | None = None, as_of: dt.date | None = None
+        self,
+        strategy_id: str | None = None,
+        as_of: dt.date | None = None,
+        *,
+        strategy_version: str | None = None,
+        config_hash: str | None = None,
     ) -> dict[str, Any] | None:
         query = "SELECT * FROM scan_runs WHERE status='success'"
         conditions: list[str] = []
@@ -129,6 +134,12 @@ class RunRepository:
         if as_of:
             conditions.append("as_of_trade_date<=?")
             parameters.append(as_of.isoformat())
+        if strategy_version:
+            conditions.append("strategy_version=?")
+            parameters.append(strategy_version)
+        if config_hash:
+            conditions.append("config_hash=?")
+            parameters.append(config_hash)
         if conditions:
             query += " AND " + " AND ".join(conditions)
         query += " ORDER BY as_of_trade_date DESC LIMIT 1"
@@ -210,10 +221,10 @@ class RunRepository:
             connection.execute(
                 """
                 INSERT INTO backtest_events
-                (run_id, symbol, signal_date, phase, entry_date, exit_date, status,
+                (run_id, symbol, signal_date, entry_kind, phase, entry_date, exit_date, status,
                  gross_return, net_return, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(run_id, symbol, signal_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, symbol, signal_date, entry_kind)
                 DO UPDATE SET phase=excluded.phase, entry_date=excluded.entry_date,
                     exit_date=excluded.exit_date, status=excluded.status,
                     gross_return=excluded.gross_return, net_return=excluded.net_return,
@@ -223,6 +234,7 @@ class RunRepository:
                     run_id,
                     event["symbol"],
                     event["signal_date"],
+                    event.get("entry_kind", "early_entry"),
                     event["phase"],
                     event.get("entry_date"),
                     event.get("exit_date"),
@@ -281,7 +293,7 @@ class RunRepository:
             )
             rows = connection.execute(
                 """SELECT payload_json FROM backtest_events WHERE run_id=?
-                ORDER BY signal_date, symbol LIMIT ? OFFSET ?""",
+                ORDER BY signal_date, symbol, entry_kind LIMIT ? OFFSET ?""",
                 (run_id, limit, offset),
             ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows], total

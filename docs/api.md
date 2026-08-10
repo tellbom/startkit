@@ -9,7 +9,7 @@
 - 成功响应：`{"data": ..., "meta": ...}`
 - 错误响应：`{"code", "message", "details", "request_id"}`
 - 默认查询中，`meta.stale=true` 表示没有可证明为当前的数据，不能解释为“今天没有推荐”；显式历史 `as_of` 查询按指定交易日解释。
-- 默认推荐仅包含 D1 后的 `entry_eligible`，并排除 `exhaustion_risk`。
+- 默认 `actionable` 推荐包含D2正常资格 `entry_eligible` 和D3独立延续资格 `continuation_entry`，并排除 `exhaustion_risk`。
 
 ## 健康检查
 
@@ -51,14 +51,15 @@
 | 参数 | 默认值 | 含义 |
 |---|---|---|
 | `strategy_id` | 空 | 统一流可指定策略 |
-| `state` | `entry_eligible` | 生命周期状态，或 `all` |
+| `state` | `actionable` | `actionable`、单个生命周期状态，或 `all` |
 | `phase` | 空 | `persistent_candidate`, `accelerating_candidate`, `exhaustion_risk` |
 | `risk` | `exclude_exhaustion` | 传 `include_exhaustion` 显式查看衰竭风险 |
+| `version_scope` | `current` | 默认只查注册表当前版本；`all` 显式追溯旧版本 |
 | `as_of` | 最近成功扫描 | ISO 交易日期 |
 | `limit` | 50 | 1～200 |
 | `offset` | 0 | 分页偏移 |
 
-推荐记录包含策略/股票标识、D0/D1/D2 日期、SHORT/STRICT 标签、D1承接类型、状态、阶段、冻结缺口边界、D0+D1排序分量、风险标记及数据质量。
+推荐记录包含策略/股票标识、D0/D1/D2/D3日期、SHORT/STRICT标签、D1承接类型、状态、阶段、冻结缺口边界、D0+D1排序分量、风险标记及数据质量。`structure_validity` 与 `entry_validity` 独立；`entry_kind` 区分 `normal_d2`、`execution_rollover` 和 `continuation_d3`。
 
 示例结构：
 
@@ -67,7 +68,7 @@
   "data": [
     {
       "strategy_id": "strong_gap_up_v1",
-      "strategy_version": "2.0.0",
+      "strategy_version": "2.1.0",
       "symbol": "600000",
       "stock_name": "浦发银行",
       "signal_date": "2026-06-30",
@@ -75,6 +76,10 @@
       "earliest_entry_date": "2026-07-02",
       "entry_eligible_until": "2026-07-02",
       "state": "entry_eligible",
+      "structure_validity": true,
+      "entry_validity": true,
+      "entry_kind": "normal_d2",
+      "entry_invalid_reason": null,
       "candidate_tags": ["SHORT_GAP", "STRICT_GAP"],
       "d1_confirmation": "fully_unfilled",
       "phase": "persistent_candidate",
@@ -131,6 +136,14 @@
 
 返回某只股票的全部策略状态历史，包含 D0 待确认、D1弱承接、交易资格、失效、过期和衰竭风险。
 
+D2正常窗口结束后，记录还会暴露：
+
+- `normal_entry_window_closed_date`：仅表示普通D2入场窗口结束；
+- `continuation_watch_date`、`continuation_entry_date`：D2重新评价及D3延续日期；
+- `d2_close_location`、`d2_expansion_from_d0_close`：D3资格所用原始分量；
+- `entry_invalid_reason=overextended`：扩张达到10%，只关闭新开仓资格；
+- `structure_validity=false`：仅在原始缺口完整回补等结构性失效时出现。
+
 ## 回测
 
 ### `GET /api/v1/backtests`
@@ -139,11 +152,11 @@
 
 ### `GET /api/v1/backtests/{run_id}`
 
-返回配置、成本、样本数、固定1/2/3/4/5交易日事件收益、MFE、MAE、缺口回补率、SHORT/STRICT、D1承接和入场延迟分组结果。
+返回配置、成本、样本数、固定1/2/3/4/5交易日事件收益、MFE、MAE、缺口回补率、SHORT/STRICT、D1承接和 `entry_kind_metrics` 分组结果，并报告D2/D3配对数量。
 `production_verified` 只有在股票池和证券状态均为完整 PIT 数据时才可能为 `true`；同时返回 PIT 日期覆盖率。
 
 ### `GET /api/v1/backtests/{run_id}/events`
 
-分页返回逐事件的信号日、确认日、真实入场日、退出日、毛/净收益、费用和状态轨迹。
+分页返回逐事件的信号日、确认日、真实入场日、退出日、毛/净收益、费用和状态轨迹。同一信号的D2 early与D3 continuation事件共享 `comparison_pair_id`，以 `entry_kind` 作为独立唯一维度，不会互相覆盖。
 
 HTTP API 不提供创建回测的 POST 端点。
