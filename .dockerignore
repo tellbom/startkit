@@ -1,0 +1,11 @@
+.git
+.env
+.venv
+data
+logs
+temp
+tests
+__pycache__
+*.pyc
+*.sqlite*
+*.parquet
