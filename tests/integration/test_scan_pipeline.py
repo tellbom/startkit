@@ -174,3 +174,7 @@ def test_recent_scan_backfills_d0_even_when_latest_day_already_succeeded(tmp_pat
     assert total == 1
     assert rows[0].signal_date == d0
     assert rows[0].confirmation_date == d1
+
+    replay = service.scan_recent(strategy, d1)
+    assert replay["triggered"] == 0
+    assert all(run["triggered"] == 0 for run in replay["daily_runs"])

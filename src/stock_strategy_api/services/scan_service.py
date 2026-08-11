@@ -147,14 +147,15 @@ class ScanService:
             result = self.scan(strategy, trade_date)
             advancement = self.advance(strategy, trade_date)
             idempotent_replay = bool(result.get("idempotent_replay", False))
+            scan_triggered = 0 if idempotent_replay else int(result.get("triggered", 0))
             scan_advances = 0 if idempotent_replay else int(result.get("advanced", 0))
-            total_triggered += int(result.get("triggered", 0))
+            total_triggered += scan_triggered
             total_advanced += scan_advances + int(advancement["updated"])
             daily_runs.append(
                 {
                     "trade_date": trade_date.isoformat(),
                     "run_id": result["run_id"],
-                    "triggered": int(result.get("triggered", 0)),
+                    "triggered": scan_triggered,
                     "advanced": scan_advances + int(advancement["updated"]),
                     "idempotent_replay": idempotent_replay,
                 }

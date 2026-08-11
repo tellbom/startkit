@@ -22,14 +22,23 @@ def test_format_message_includes_actionable_signal():
         dt.date(2026, 8, 11),
         "强势向上跳空缺口",
         "2.1",
-        {"triggered": 3, "advanced": 2},
+        {
+            "triggered": 3,
+            "advanced": 2,
+            "daily_runs": [
+                {"trade_date": "2026-08-10", "triggered": 3, "advanced": 2},
+                {"trade_date": "2026-08-11", "triggered": 0, "advanced": 0},
+            ],
+        },
         [signal],
         1,
     )
 
     assert "示例股份（600000.SH）" in message
     assert "评分：88.5" in message
-    assert "当前可执行信号：1" in message
+    assert "今日新增 D0 候选：0（观察信号，不等于可执行）" in message
+    assert "今日状态变化：0（包含确认、失效、过期等）" in message
+    assert "当前可执行观察信号：1（仅此项进入下方清单）" in message
 
 
 def test_fit_utf8_respects_wecom_payload_limit():

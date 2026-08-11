@@ -80,11 +80,18 @@ def run(as_of: dt.date, webhook_url: str) -> dict:
 
 
 def format_message(as_of, strategy_name, strategy_version, scan, recommendations, total) -> str:
+    today = next(
+        (item for item in scan.get("daily_runs", ()) if item.get("trade_date") == as_of.isoformat()),
+        {},
+    )
+    today_triggered = int(today.get("triggered", scan.get("triggered", 0)))
+    today_advanced = int(today.get("advanced", scan.get("advanced", 0)))
     lines = [
         f"**{strategy_name} v{strategy_version}**",
         f"> 交易日：{as_of.isoformat()}",
-        f"> 本次扫描：触发 {scan.get('triggered', 0)}，推进 {scan.get('advanced', 0)}",
-        f"> 当前可执行信号：{total}",
+        f"> 今日新增 D0 候选：{today_triggered}（观察信号，不等于可执行）",
+        f"> 今日状态变化：{today_advanced}（包含确认、失效、过期等）",
+        f"> 当前可执行观察信号：{total}（仅此项进入下方清单）",
         "",
     ]
     if recommendations:
