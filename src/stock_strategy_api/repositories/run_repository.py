@@ -163,6 +163,86 @@ class RunRepository:
             ).fetchone()
         return _row_to_dict(row) if row else None
 
+    def strategy_action(self, strategy: Strategy, as_of: dt.date, action_key: str) -> dict[str, Any] | None:
+        metadata = strategy.metadata()
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """SELECT * FROM strategy_actions
+                WHERE strategy_id=? AND strategy_version=? AND config_hash=?
+                  AND as_of_trade_date=? AND action_key=?""",
+                (
+                    metadata.strategy_id,
+                    metadata.version,
+                    strategy.config_hash(),
+                    as_of.isoformat(),
+                    action_key,
+                ),
+            ).fetchone()
+        return _row_to_dict(row) if row else None
+
+    def claim_strategy_action(
+        self,
+        strategy: Strategy,
+        as_of: dt.date,
+        action_key: str,
+        payload_hash: str,
+    ) -> bool:
+        metadata = strategy.metadata()
+        natural_key = (
+            metadata.strategy_id,
+            metadata.version,
+            strategy.config_hash(),
+            as_of.isoformat(),
+            action_key,
+        )
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """SELECT status FROM strategy_actions
+                WHERE strategy_id=? AND strategy_version=? AND config_hash=?
+                  AND as_of_trade_date=? AND action_key=?""",
+                natural_key,
+            ).fetchone()
+            if existing:
+                return False
+            connection.execute(
+                """INSERT INTO strategy_actions
+                (strategy_id, strategy_version, config_hash, as_of_trade_date, action_key,
+                 status, payload_hash, started_at)
+                VALUES (?, ?, ?, ?, ?, 'running', ?, ?)""",
+                (*natural_key, payload_hash, iso_now()),
+            )
+        return True
+
+    def finish_strategy_action(
+        self,
+        strategy: Strategy,
+        as_of: dt.date,
+        action_key: str,
+        payload_hash: str,
+        result: dict[str, Any],
+    ) -> None:
+        metadata = strategy.metadata()
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE strategy_actions
+                SET status='success', finished_at=?, result_json=?
+                WHERE strategy_id=? AND strategy_version=? AND config_hash=?
+                  AND as_of_trade_date=? AND action_key=? AND status='running' AND payload_hash=?""",
+                (
+                    iso_now(),
+                    json.dumps(result, ensure_ascii=False, sort_keys=True),
+                    metadata.strategy_id,
+                    metadata.version,
+                    strategy.config_hash(),
+                    as_of.isoformat(),
+                    action_key,
+                    payload_hash,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RunConflictError("strategy action claim is missing or already completed")
+
     def create_backtest(
         self,
         strategy: Strategy,
@@ -301,7 +381,7 @@ class RunRepository:
 
 def _row_to_dict(row) -> dict:
     result = dict(row)
-    for key in ("stats_json", "error_json", "parameters_json", "metrics_json"):
+    for key in ("stats_json", "error_json", "parameters_json", "metrics_json", "result_json"):
         if key in result:
             result[key.removesuffix("_json")] = json.loads(result.pop(key) or "null")
     for key in ("survivorship_bias", "security_master_pit", "production_verified"):

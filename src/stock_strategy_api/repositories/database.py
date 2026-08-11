@@ -32,6 +32,20 @@ CREATE TABLE IF NOT EXISTS scan_runs (
     UNIQUE (strategy_id, strategy_version, config_hash, as_of_trade_date)
 );
 
+CREATE TABLE IF NOT EXISTS strategy_actions (
+    strategy_id TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
+    as_of_trade_date TEXT NOT NULL,
+    action_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    result_json TEXT,
+    PRIMARY KEY (strategy_id, strategy_version, config_hash, as_of_trade_date, action_key)
+);
+
 CREATE TABLE IF NOT EXISTS signals (
     signal_id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy_id TEXT NOT NULL,

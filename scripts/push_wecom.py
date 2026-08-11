@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import sys
@@ -21,6 +22,7 @@ from stock_strategy_api.strategies.registry import get_registry
 
 STRATEGY_ID = "strong_gap_up_v1"
 ACTIONABLE_STATES = ("entry_eligible", "continuation_entry")
+DAILY_ACTION_KEY = "publish_daily_strategy_result"
 MAX_MESSAGE_BYTES = 4000
 
 
@@ -32,6 +34,16 @@ def run(as_of: dt.date, webhook_url: str) -> dict:
     signals = SignalRepository(database)
     registry = get_registry()
     strategy = registry.get(STRATEGY_ID)
+
+    existing_action = runs.strategy_action(strategy, as_of, DAILY_ACTION_KEY)
+    if existing_action:
+        result = {
+            "status": "duplicate_suppressed",
+            "as_of": as_of.isoformat(),
+            "action_status": existing_action["status"],
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
 
     try:
         sync = DataSyncService(settings.data_dir).sync(as_of).to_dict()
@@ -48,7 +60,13 @@ def run(as_of: dt.date, webhook_url: str) -> dict:
         limit=200,
     )
     content = format_message(as_of, strategy.metadata().name, strategy.metadata().version, scan, recommendations, total)
+    payload_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    if not runs.claim_strategy_action(strategy, as_of, DAILY_ACTION_KEY, payload_hash):
+        result = {"status": "duplicate_suppressed", "as_of": as_of.isoformat(), "action_status": "claimed"}
+        print(json.dumps(result, ensure_ascii=False))
+        return result
     response = send_wecom(webhook_url, content)
+    runs.finish_strategy_action(strategy, as_of, DAILY_ACTION_KEY, payload_hash, response)
     result = {
         "status": "sent",
         "as_of": as_of.isoformat(),
