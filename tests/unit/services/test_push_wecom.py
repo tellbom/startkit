@@ -32,6 +32,7 @@ def test_format_message_includes_actionable_signal():
         },
         [signal],
         1,
+        sync={"universe_count": 300, "missing_symbols": ["688041"]},
     )
 
     assert "示例股份（600000.SH）" in message
@@ -39,6 +40,8 @@ def test_format_message_includes_actionable_signal():
     assert "今日新增 D0 候选：0（观察信号，不等于可执行）" in message
     assert "今日状态变化：0（包含确认、失效、过期等）" in message
     assert "当前可执行观察信号：1（仅此项进入下方清单）" in message
+    assert "降级运行：缺失 1/300 只（0.33%）" in message
+    assert "缺失股票：688041" in message
 
 
 def test_fit_utf8_respects_wecom_payload_limit():
@@ -46,3 +49,17 @@ def test_fit_utf8_respects_wecom_payload_limit():
 
     assert len(result.encode("utf-8")) <= MAX_MESSAGE_BYTES
     assert result.endswith("（内容过长，已截断）")
+
+
+def test_format_message_reports_complete_coverage():
+    message = format_message(
+        dt.date(2026, 8, 13),
+        "策略",
+        "2.1",
+        {"daily_runs": []},
+        [],
+        0,
+        sync={"universe_count": 300, "missing_symbols": []},
+    )
+
+    assert "数据覆盖：完整" in message

@@ -10,6 +10,7 @@ from stock_strategy_api.market_data.calendar import CalendarService
 from stock_strategy_api.market_data.ohlcv import OHLCVCollector
 from stock_strategy_api.market_data.security_master import SecurityMasterService
 from stock_strategy_api.market_data.universe import UniverseService
+from stock_strategy_api.services.data_quality import maximum_missing_symbols, missing_symbols_within_gate
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +19,9 @@ class DataSyncSummary:
     universe_count: int
     ohlcv_succeeded: int
     ohlcv_failed: int
+    missing_symbols: tuple[str, ...]
+    missing_symbol_ratio: float
+    degraded: bool
     security_rows: int
     calendar_source: str
     calendar_accuracy_warning: str | None
@@ -26,6 +30,7 @@ class DataSyncSummary:
     def to_dict(self) -> dict:
         result = asdict(self)
         result["as_of"] = self.as_of.isoformat()
+        result["missing_symbols"] = list(self.missing_symbols)
         return result
 
 
@@ -52,21 +57,26 @@ class DataSyncService:
         security = self.security_master.fetch_and_save(as_of)
         collection = self.ohlcv.run(as_of)
         succeeded = sum(1 for result in collection.results if result.success)
+        missing_symbols = tuple(sorted({result.symbol for result in collection.failed}))
         summary = DataSyncSummary(
             as_of=as_of,
             universe_count=len(snapshot.symbols),
             ohlcv_succeeded=succeeded,
             ohlcv_failed=len(collection.failed),
+            missing_symbols=missing_symbols,
+            missing_symbol_ratio=round(len(missing_symbols) / len(snapshot.symbols), 6),
+            degraded=bool(missing_symbols),
             security_rows=len(security),
             calendar_source=self.calendar.source(),
             calendar_accuracy_warning=self.calendar.accuracy_warning(),
             finished_at=iso_now(),
         )
-        if collection.failed:
+        if not missing_symbols_within_gate(len(missing_symbols), len(snapshot.symbols)):
             raise DataUnavailableError(
-                "OHLCV synchronization completed with failures",
+                "OHLCV synchronization exceeded the missing-symbol gate",
                 details={
                     **summary.to_dict(),
+                    "maximum_missing_symbols": maximum_missing_symbols(len(snapshot.symbols)),
                     "failed": [
                         {"symbol": result.symbol, "adjustment": result.adjustment, "error": result.error}
                         for result in collection.failed

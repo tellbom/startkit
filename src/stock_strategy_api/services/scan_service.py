@@ -12,6 +12,7 @@ from stock_strategy_api.market_data.security_master import SecurityMasterService
 from stock_strategy_api.market_data.universe import UniverseService
 from stock_strategy_api.repositories.run_repository import RunRepository
 from stock_strategy_api.repositories.signal_repository import SignalRepository
+from stock_strategy_api.services.data_quality import maximum_missing_symbols, missing_symbols_within_gate
 from stock_strategy_api.strategies.base import Strategy
 
 
@@ -39,6 +40,7 @@ class ScanService:
             return {"run_id": existing["run_id"], **existing["stats"], "idempotent_replay": True}
         run_id = self.runs.start_scan(strategy, as_of)
         stats: collections.Counter[str] = collections.Counter()
+        missing_symbols: set[str] = set()
         pending_signals = []
         try:
             universe = self.universe.members_as_of(as_of)
@@ -53,10 +55,13 @@ class ScanService:
                 raw = self.ohlcv.load(symbol, "raw")
                 qfq = self.ohlcv.load(symbol, "qfq")
                 if raw.empty or qfq.empty:
-                    stats["data_missing"] += 1
+                    missing_symbols.add(symbol)
                     continue
                 day = raw.loc[raw["date"] == as_of]
-                day_bar = day.iloc[-1] if not day.empty else None
+                if day.empty or not (qfq["date"] == as_of).any():
+                    missing_symbols.add(symbol)
+                    continue
+                day_bar = day.iloc[-1]
                 eligibility = self.security_master.evaluate(
                     symbol,
                     as_of,
@@ -68,9 +73,6 @@ class ScanService:
                     stats["not_eligible"] += 1
                     for reason in eligibility.reasons:
                         stats[f"excluded:{reason}"] += 1
-                    continue
-                if not (qfq["date"] == as_of).any():
-                    stats["data_missing"] += 1
                     continue
                 detection = strategy.detect(
                     raw,
@@ -92,10 +94,21 @@ class ScanService:
                     stats["not_triggered"] += 1
                     for reason in detection.exclusion_reasons:
                         stats[f"excluded:{reason}"] += 1
-            if stats["data_missing"]:
+            stats["data_missing"] = len(missing_symbols)
+            if not missing_symbols_within_gate(len(missing_symbols), len(universe.symbols)):
                 raise DataUnavailableError(
-                    "scan input is incomplete",
-                    details={"missing_symbols": stats["data_missing"], "universe_count": len(universe.symbols)},
+                    "scan input exceeded the missing-symbol gate",
+                    details={
+                        "missing_symbol_count": len(missing_symbols),
+                        "missing_symbols": sorted(missing_symbols),
+                        "maximum_missing_symbols": maximum_missing_symbols(len(universe.symbols)),
+                        "universe_count": len(universe.symbols),
+                    },
+                )
+            quality_warnings = [universe.warning] if universe.warning else []
+            if missing_symbols:
+                quality_warnings.append(
+                    f"Degraded scan: {len(missing_symbols)}/{len(universe.symbols)} symbols are missing."
                 )
             summary = {
                 "universe_count": len(universe.symbols),
@@ -103,7 +116,10 @@ class ScanService:
                 "survivorship_bias": universe.survivorship_bias,
                 "universe_data_date": universe.data_date.isoformat() if universe.data_date else None,
                 "universe_stale": universe.stale,
-                "quality_warnings": [universe.warning] if universe.warning else [],
+                "quality_warnings": quality_warnings,
+                "missing_symbols": sorted(missing_symbols),
+                "missing_symbol_ratio": round(len(missing_symbols) / len(universe.symbols), 6),
+                "degraded": bool(missing_symbols),
                 **dict(stats),
             }
             self.runs.commit_scan_results(

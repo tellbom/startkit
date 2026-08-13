@@ -59,7 +59,15 @@ def run(as_of: dt.date, webhook_url: str) -> dict:
         as_of=as_of,
         limit=200,
     )
-    content = format_message(as_of, strategy.metadata().name, strategy.metadata().version, scan, recommendations, total)
+    content = format_message(
+        as_of,
+        strategy.metadata().name,
+        strategy.metadata().version,
+        scan,
+        recommendations,
+        total,
+        sync=sync,
+    )
     payload_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
     if not runs.claim_strategy_action(strategy, as_of, DAILY_ACTION_KEY, payload_hash):
         result = {"status": "duplicate_suppressed", "as_of": as_of.isoformat(), "action_status": "claimed"}
@@ -79,7 +87,7 @@ def run(as_of: dt.date, webhook_url: str) -> dict:
     return result
 
 
-def format_message(as_of, strategy_name, strategy_version, scan, recommendations, total) -> str:
+def format_message(as_of, strategy_name, strategy_version, scan, recommendations, total, *, sync=None) -> str:
     today = next(
         (item for item in scan.get("daily_runs", ()) if item.get("trade_date") == as_of.isoformat()),
         {},
@@ -92,8 +100,20 @@ def format_message(as_of, strategy_name, strategy_version, scan, recommendations
         f"> 今日新增 D0 候选：{today_triggered}（观察信号，不等于可执行）",
         f"> 今日状态变化：{today_advanced}（包含确认、失效、过期等）",
         f"> 当前可执行观察信号：{total}（仅此项进入下方清单）",
-        "",
     ]
+    missing_symbols = sorted(set((sync or {}).get("missing_symbols", ())) | set(scan.get("missing_symbols", ())))
+    universe_count = int((sync or {}).get("universe_count", scan.get("universe_count", 300)))
+    if missing_symbols:
+        missing_ratio = len(missing_symbols) / universe_count if universe_count else 0
+        lines.extend(
+            [
+                f"> ⚠️ 降级运行：缺失 {len(missing_symbols)}/{universe_count} 只（{missing_ratio:.2%}）",
+                f"> 缺失股票：{', '.join(missing_symbols)}",
+            ]
+        )
+    else:
+        lines.append("> 数据覆盖：完整")
+    lines.append("")
     if recommendations:
         for index, signal in enumerate(recommendations, 1):
             entry_date = signal.continuation_entry_date or signal.earliest_entry_date or signal.confirmation_date
