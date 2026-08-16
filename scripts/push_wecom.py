@@ -4,9 +4,9 @@ import datetime as dt
 import hashlib
 import json
 import os
+import secrets
 import sys
-import urllib.request
-from pathlib import Path
+import time
 from zoneinfo import ZoneInfo
 
 from stock_strategy_api.core.config import get_settings
@@ -19,14 +19,16 @@ from stock_strategy_api.services.recommendation_service import RecommendationSer
 from stock_strategy_api.services.scan_service import ScanService
 from stock_strategy_api.strategies.registry import get_registry
 
-
 STRATEGY_ID = "strong_gap_up_v1"
 ACTIONABLE_STATES = ("entry_eligible", "continuation_entry")
 DAILY_ACTION_KEY = "publish_daily_strategy_result"
 MAX_MESSAGE_BYTES = 4000
+DEFAULT_WECOM_WS_URL = "wss://openws.work.weixin.qq.com"
+WECOM_SUBSCRIBE_CMD = "aibot_subscribe"
+WECOM_SEND_CMD = "aibot_send_msg"
 
 
-def run(as_of: dt.date, webhook_url: str) -> dict:
+def run(as_of: dt.date, bot_id: str, bot_secret: str, chat_id: str, ws_url: str = DEFAULT_WECOM_WS_URL) -> dict:
     settings = get_settings()
     database = Database(settings.database_path)
     database.initialize()
@@ -73,7 +75,7 @@ def run(as_of: dt.date, webhook_url: str) -> dict:
         result = {"status": "duplicate_suppressed", "as_of": as_of.isoformat(), "action_status": "claimed"}
         print(json.dumps(result, ensure_ascii=False))
         return result
-    response = send_wecom(webhook_url, content)
+    response = send_wecom(bot_id, bot_secret, chat_id, content, ws_url=ws_url)
     runs.finish_strategy_action(strategy, as_of, DAILY_ACTION_KEY, payload_hash, response)
     result = {
         "status": "sent",
@@ -129,19 +131,96 @@ def format_message(as_of, strategy_name, strategy_version, scan, recommendations
     return _fit_utf8("\n".join(lines), MAX_MESSAGE_BYTES)
 
 
-def send_wecom(webhook_url: str, content: str) -> dict:
-    payload = json.dumps({"msgtype": "markdown", "markdown": {"content": content}}, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        webhook_url,
-        data=payload,
-        headers={"Content-Type": "application/json; charset=utf-8"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        result = json.loads(response.read().decode("utf-8"))
-    if result.get("errcode") != 0:
-        raise RuntimeError(f"WeCom webhook rejected the message: {result}")
-    return result
+def send_wecom(
+    bot_id: str,
+    bot_secret: str,
+    chat_id: str,
+    content: str,
+    *,
+    ws_url: str = DEFAULT_WECOM_WS_URL,
+    connect=None,
+    timeout: float = 20,
+) -> dict:
+    """Authenticate over WeCom's long connection and actively push one Markdown message."""
+    if connect is None:
+        import certifi
+        from websocket import create_connection
+
+        connect = create_connection
+        ssl_options = {"ca_certs": certifi.where()}
+    else:
+        ssl_options = None
+
+    connect_options = {"timeout": timeout, "suppress_origin": True}
+    if ssl_options:
+        connect_options["sslopt"] = ssl_options
+    connection = connect(ws_url, **connect_options)
+    try:
+        subscribe_req_id = _request_id(WECOM_SUBSCRIBE_CMD)
+        _send_frame(
+            connection,
+            {
+                "cmd": WECOM_SUBSCRIBE_CMD,
+                "headers": {"req_id": subscribe_req_id},
+                "body": {"bot_id": bot_id, "secret": bot_secret},
+            },
+        )
+        subscribe_ack = _receive_ack(connection, subscribe_req_id, timeout)
+        _require_success(subscribe_ack, "authentication")
+
+        send_req_id = _request_id(WECOM_SEND_CMD)
+        _send_frame(
+            connection,
+            {
+                "cmd": WECOM_SEND_CMD,
+                "headers": {"req_id": send_req_id},
+                "body": {
+                    "chatid": chat_id,
+                    "msgtype": "markdown",
+                    "markdown": {"content": content},
+                },
+            },
+        )
+        send_ack = _receive_ack(connection, send_req_id, timeout)
+        _require_success(send_ack, "message push")
+        return {
+            "errcode": send_ack.get("errcode"),
+            "errmsg": send_ack.get("errmsg"),
+            "req_id": send_req_id,
+            "transport": "wecom_aibot_websocket",
+        }
+    finally:
+        connection.close()
+
+
+def _request_id(prefix: str) -> str:
+    return f"{prefix}_{int(time.time() * 1000)}_{secrets.token_hex(4)}"
+
+
+def _send_frame(connection, frame: dict) -> None:
+    connection.send(json.dumps(frame, ensure_ascii=False))
+
+
+def _receive_ack(connection, req_id: str, timeout: float) -> dict:
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"Timed out waiting for WeCom acknowledgement: {req_id}")
+        connection.settimeout(remaining)
+        raw = connection.recv()
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        frame = json.loads(raw)
+        if frame.get("headers", {}).get("req_id") == req_id:
+            return frame
+
+
+def _require_success(frame: dict, operation: str) -> None:
+    if frame.get("errcode") != 0:
+        raise RuntimeError(
+            f"WeCom {operation} failed: errcode={frame.get('errcode')}, errmsg={frame.get('errmsg')}"
+        )
 
 
 def _fit_utf8(value: str, limit: int) -> str:
@@ -154,16 +233,21 @@ def _fit_utf8(value: str, limit: int) -> str:
 
 
 def main() -> int:
-    webhook_url = os.environ.get("WECOM_WEBHOOK_URL")
-    if not webhook_url:
-        print("WECOM_WEBHOOK_URL is required", file=sys.stderr)
+    required = ("WECOM_BOT_ID", "WECOM_BOT_SECRET", "WECOM_BOT_CHAT_ID")
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        print(f"{', '.join(missing)} is required", file=sys.stderr)
         return 2
+    bot_id = os.environ["WECOM_BOT_ID"]
+    bot_secret = os.environ["WECOM_BOT_SECRET"]
+    chat_id = os.environ["WECOM_BOT_CHAT_ID"]
+    ws_url = os.environ.get("WECOM_BOT_WS_URL", DEFAULT_WECOM_WS_URL)
     timezone = ZoneInfo(os.environ.get("STOCK_STRATEGY_TIMEZONE", "Asia/Shanghai"))
     as_of = dt.datetime.now(timezone).date()
     if len(sys.argv) == 3 and sys.argv[1] == "--as-of":
         as_of = dt.date.fromisoformat(sys.argv[2])
     try:
-        run(as_of, webhook_url)
+        run(as_of, bot_id, bot_secret, chat_id, ws_url)
         return 0
     except Exception as exc:
         print(json.dumps({"status": "failed", "as_of": as_of.isoformat(), "error": str(exc)}, ensure_ascii=False))

@@ -10,12 +10,14 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "akshare>=1.17.0",
+  "certifi>=2024.2.2",
   "exchange-calendars>=4.5",
   "fastapi>=0.115",
   "pandas>=2.2",
   "pyarrow>=17.0",
   "pydantic-settings>=2.6",
   "uvicorn>=0.30",
+  "websocket-client>=1.8",
 ]
 
 [project.optional-dependencies]

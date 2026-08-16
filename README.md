@@ -20,6 +20,17 @@ uvicorn stock_strategy_api.main:app --reload
 
 接口文档：`http://127.0.0.1:8000/docs`。
 
+## 企业微信智能机器人推送
+
+每日策略脚本使用企业微信智能机器人的 WebSocket 长连接主动推送，不再使用群机器人 webhook。运行环境需要提供：
+
+- `WECOM_BOT_ID`：智能机器人的 Bot ID；
+- `WECOM_BOT_SECRET`：智能机器人的 Secret；
+- `WECOM_BOT_CHAT_ID`：接收会话，单聊填写成员 userid，群聊填写 chatid；
+- `WECOM_BOT_WS_URL`：可选，默认 `wss://openws.work.weixin.qq.com`。
+
+凭证只应通过受限环境文件或密钥管理服务注入，不应写入仓库。脚本先完成 `aibot_subscribe` 鉴权，再通过 `aibot_send_msg` 发送 Markdown；只有企业微信回执 `errcode=0` 后才会把策略动作标记为成功。
+
 生产或长期运行前复制 `.env.example` 为 `.env`，至少确认数据目录、SQLite 路径、数据新鲜度和回测费用。运行数据全部写入本项目自己的 `data/`，不会读取其他本地仓库。
 
 ## CLI
