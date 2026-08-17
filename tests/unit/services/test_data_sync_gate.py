@@ -47,7 +47,12 @@ def _service(failed_symbols: list[str], *, duplicate_adjustments: bool = False) 
         )
     failure_ids = {(item.symbol, item.adjustment) for item in failures}
     results = [
-        SimpleNamespace(symbol=symbol, adjustment=adjustment, success=(symbol, adjustment) not in failure_ids)
+        SimpleNamespace(
+            symbol=symbol,
+            adjustment=adjustment,
+            success=(symbol, adjustment) not in failure_ids,
+            rows_new=0 if adjustment == "raw" else 1,
+        )
         for symbol in _Universe.symbols
         for adjustment in ("raw", "qfq")
     ]
@@ -65,6 +70,9 @@ def test_sync_allows_up_to_fifteen_unique_missing_symbols():
     assert summary.degraded is True
     assert len(summary.missing_symbols) == 15
     assert summary.missing_symbol_ratio == 0.05
+    assert summary.ohlcv_updated == 285
+    assert summary.ohlcv_up_to_date == 285
+    assert summary.ohlcv_rows_new == 285
 
 
 def test_sync_rejects_sixteen_unique_missing_symbols():

@@ -138,3 +138,55 @@ def test_up_to_date_collection_skips_network_and_adjustment_paths_are_separate(t
     result = OHLCVCollector(tmp_path).collect_symbol("600000", "raw", end)
     assert result.rows_new == 0
     assert result.last_date == end
+
+
+def test_incremental_fetch_starts_after_last_stored_date(tmp_path, monkeypatch):
+    existing_date = dt.date(2026, 1, 2)
+    end = dt.date(2026, 1, 5)
+    path = ohlcv_path(tmp_path, "600000", "raw")
+    write_ohlcv(
+        pd.DataFrame(
+            [
+                {
+                    "symbol": "600000",
+                    "date": existing_date,
+                    "open": 1,
+                    "high": 2,
+                    "low": 1,
+                    "close": 2,
+                    "volume": 10,
+                }
+            ]
+        ),
+        path,
+        "600000",
+    )
+    captured = {}
+
+    def fetch(symbol, adjustment, start, requested_end):
+        captured.update(symbol=symbol, adjustment=adjustment, start=start, end=requested_end)
+        return pd.DataFrame(
+            [
+                {
+                    "symbol": symbol,
+                    "date": end,
+                    "open": 2,
+                    "high": 3,
+                    "low": 2,
+                    "close": 3,
+                    "volume": 20,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(OHLCVCollector, "_fetch", staticmethod(fetch))
+    result = OHLCVCollector(tmp_path).collect_symbol("600000", "raw", end)
+
+    assert captured == {
+        "symbol": "600000",
+        "adjustment": "raw",
+        "start": existing_date + dt.timedelta(days=1),
+        "end": end,
+    }
+    assert result.rows_new == 1
+    assert result.rows_total == 2

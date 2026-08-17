@@ -1,8 +1,13 @@
 #!/bin/sh
 set -eu
 
+PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+
 PROJECT_DIR=${STOCK_STRATEGY_PROJECT_DIR:-"$HOME/stock-strategy-api"}
 ENV_FILE=${STOCK_STRATEGY_ENV_FILE:-"$HOME/.config/stock-strategy-api.env"}
+DOCKER_BIN=${STOCK_STRATEGY_DOCKER_BIN:-/usr/local/bin/docker}
+DOCKER_IMAGE=${STOCK_STRATEGY_DOCKER_IMAGE:-stock-strategy-api:20260817-incremental}
 LOCK_DIR="$PROJECT_DIR/.daily.lock"
 
 acquire_lock() {
@@ -31,13 +36,32 @@ release_lock() {
 acquire_lock
 trap release_lock EXIT HUP INT TERM
 
-set -a
-. "$ENV_FILE"
-set +a
-
-export STOCK_STRATEGY_DATA_DIR="$PROJECT_DIR/data"
-export STOCK_STRATEGY_DATABASE_PATH="$PROJECT_DIR/data/strategy.sqlite3"
-
 mkdir -p "$PROJECT_DIR/data" "$PROJECT_DIR/logs"
 cd "$PROJECT_DIR"
-"$PROJECT_DIR/.venv/bin/python" scripts/push_wecom.py "$@"
+printf '{"event":"daily_job_start","time":"%s","project_dir":"%s","data_dir":"%s"}\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$PROJECT_DIR" "$PROJECT_DIR/data"
+
+if ! "$DOCKER_BIN" info >/dev/null 2>&1; then
+    /usr/bin/open -gja Docker
+    ready=0
+    for _attempt in $(seq 1 24); do
+        if "$DOCKER_BIN" info >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 5
+    done
+    if [ "$ready" -ne 1 ]; then
+        printf 'Docker daemon did not become ready within 120 seconds\n' >&2
+        exit 1
+    fi
+fi
+
+"$DOCKER_BIN" run --rm --init \
+    --name stock-strategy-api-daily \
+    --env-file "$ENV_FILE" \
+    -e STOCK_STRATEGY_DATA_DIR=/app/data \
+    -e STOCK_STRATEGY_DATABASE_PATH=/app/data/strategy.sqlite3 \
+    -v "$PROJECT_DIR/data:/app/data" \
+    "$DOCKER_IMAGE" \
+    python scripts/push_wecom.py "$@"

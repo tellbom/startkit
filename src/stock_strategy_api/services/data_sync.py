@@ -19,6 +19,9 @@ class DataSyncSummary:
     universe_count: int
     ohlcv_succeeded: int
     ohlcv_failed: int
+    ohlcv_updated: int
+    ohlcv_up_to_date: int
+    ohlcv_rows_new: int
     missing_symbols: tuple[str, ...]
     missing_symbol_ratio: float
     degraded: bool
@@ -57,12 +60,18 @@ class DataSyncService:
         security = self.security_master.fetch_and_save(as_of)
         collection = self.ohlcv.run(as_of)
         succeeded = sum(1 for result in collection.results if result.success)
+        updated = sum(1 for result in collection.results if result.success and getattr(result, "rows_new", 0) > 0)
+        up_to_date = sum(1 for result in collection.results if result.success and getattr(result, "rows_new", 0) == 0)
+        rows_new = sum(getattr(result, "rows_new", 0) for result in collection.results if result.success)
         missing_symbols = tuple(sorted({result.symbol for result in collection.failed}))
         summary = DataSyncSummary(
             as_of=as_of,
             universe_count=len(snapshot.symbols),
             ohlcv_succeeded=succeeded,
             ohlcv_failed=len(collection.failed),
+            ohlcv_updated=updated,
+            ohlcv_up_to_date=up_to_date,
+            ohlcv_rows_new=rows_new,
             missing_symbols=missing_symbols,
             missing_symbol_ratio=round(len(missing_symbols) / len(snapshot.symbols), 6),
             degraded=bool(missing_symbols),
